@@ -259,6 +259,8 @@ class MainActivity : ComponentActivity() {
                                 icon = { Text("✉") }, label = { Text("Chat") })
                             NavigationBarItem(selected = tab == 2 && downloadFor == null, onClick = { leave(); showQueue = false; tab = 2 },
                                 icon = { Text("▦") }, label = { Text("Gallery") })
+                            NavigationBarItem(selected = tab == 3 && downloadFor == null, onClick = { leave(); showQueue = false; tab = 3 },
+                                icon = { Text("⚙") }, label = { Text("Settings") })
                         }
                     },
                 ) { pad ->
@@ -308,6 +310,7 @@ class MainActivity : ComponentActivity() {
                             }
                             tab == 1 -> ChatScreen(Chat.get(ctx), lingInstalled = installedOf["ling"] != null,
                                 onDownload = { downloadFor = "ling" }, onOpen = { open = it })
+                            tab == 3 -> SettingsScreen()
                             else -> GalleryGrid(onOpen = { open = it })
                         }
                     }
@@ -474,10 +477,6 @@ fun Create(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Model: $modelLabel", style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = onChangeModel, enabled = !s.busy) { Text("Change") }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Show usage stats at the top", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-            Switch(StatsBar.shown(ctx), { StatsBar.set(ctx, it) })
         }
         if (Installer.running) {
             Text("Updating the model: ${Installer.status}", style = MaterialTheme.typography.bodySmall)

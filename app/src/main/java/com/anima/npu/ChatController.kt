@@ -73,7 +73,8 @@ class ChatController(ctx: Context) {
         // a picture already drawing finishes first (the gate puts the chat before the queue's next one)
         NpuGate.gate.withChat {
             if (!LocalLing.running()) {
-                _state.value = TurnState(id, "loading", "", "")
+                val first = LocalLing.expertSlots(app) > 0 && !File(LocalLing.expertFile(app).path + ".done").isFile
+                _state.value = TurnState(id, if (first) "preparing" else "loading", "", "")
                 // The picture models stay loaded after a picture (2.7 GB on the AI chip). With Ling's 4.5 GB on top,
                 // a 12 GB phone ran out and Android closed the app while on screen: it cannot close Ling's server,
                 // a program of its own, so it closes everything else (S25 Edge, 2026-10-09). No picture is drawing

@@ -40,7 +40,8 @@ fun checkDraw(argsJson: String, hasAttachedPicture: Boolean, qwenCanEdit: Boolea
 
 fun systemPrompt(qwenName: String) = """
 You are the assistant inside Anima, an app that draws pictures on this phone. Keep replies short and friendly.
-When the user asks for a picture, call draw_picture. Choose the model yourself: "anima" for anime, manga and
+Call draw_picture only when the user asks for a picture or a change to one; for greetings, questions and
+conversation just answer in words, never drawing one as an example. Choose the model yourself: "anima" for anime, manga and
 illustration; "qwen" ($qwenName) for photos, realistic scenes, text inside pictures, and any edit of an attached
 picture. If the user names a model, use that one. Write the prompt in that model's style: tags for anima, full
 sentences for qwen. After the tool answers, tell the user in one sentence that the pictures are on their way.

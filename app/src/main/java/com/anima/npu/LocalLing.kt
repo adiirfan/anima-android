@@ -20,6 +20,22 @@ object LocalLing {
     const val FILE = "Ling-3.0-tiny-Q4_0-npu2.gguf"
 
     fun modelFile(ctx: Context) = File(ModelStore.LING.modelDir(ctx), FILE)
+    /** The experts repacked for the AI chip, read in as needed when streaming (made on the first start, 3.9 GB). */
+    fun expertFile(ctx: Context) = File(ModelStore.LING.modelDir(ctx), "Ling-3.0-tiny-Q4_0-npu2.experts")
+
+    /**
+     * How many of each layer's 128 experts stay on the AI chip; 0 keeps them all there (fastest, about 4.5 GB
+     * locked). Streaming the rest from the expert file costs speed but frees the memory for other apps: on the
+     * S25 Edge 32 locked 1.8 GB instead of 4.6 and wrote 13 words a second instead of 25 (2026-10-09).
+     */
+    fun expertSlots(ctx: Context): Int = ctx.getSharedPreferences("anima", Context.MODE_PRIVATE).getInt("lingExperts", 32)
+
+    fun setExpertSlots(ctx: Context, n: Int) {
+        ctx.getSharedPreferences("anima", Context.MODE_PRIVATE).edit().putInt("lingExperts", n).apply()
+        // the next message starts Ling with the new setting
+        Thread { stop() }.start()
+        if (n == 0) { expertFile(ctx).delete(); File(expertFile(ctx).path + ".done").delete() }
+    }
     fun ready(ctx: Context): Boolean = modelFile(ctx).length() > 0
 
     @Volatile private var proc: Process? = null
@@ -64,6 +80,12 @@ object LocalLing {
         // the vendor's: the vendor's older libc++.so lacks symbols the Samsung's (Android 16) system liblog.so needs.
         pb.environment()["LD_LIBRARY_PATH"] = "$libs:/system/lib64:/vendor/lib64:/system/vendor/lib64"
         pb.environment()["ADSP_LIBRARY_PATH"] = libs
+        val slots = expertSlots(ctx)
+        if (slots > 0) {
+            pb.environment()["GGML_HEXAGON_EXPERT_SLOTS"] = slots.toString()
+            pb.environment()["GGML_HEXAGON_EXPERT_FILE"] = expertFile(ctx).absolutePath
+            if (!File(expertFile(ctx).path + ".done").isFile) say("Preparing Ling for low memory (first time, about a minute)…")
+        }
         pb.redirectErrorStream(true)
         val started = try { pb.start() } catch (e: Exception) {
             keep("could not start: ${e.message}"); say("Could not start Ling: ${e.message}"); return false

@@ -109,6 +109,7 @@ fun ChatScreen(chat: ChatController, lingInstalled: Boolean, onDownload: () -> U
             val lingState = when (turn.phase) {
                 "waiting" -> "Waiting for the current picture…"
                 "loading" -> "Loading Ling…"
+                "preparing" -> "Preparing Ling for low memory (first time, about a minute)…"
                 "thinking" -> "Thinking…"
                 "tool" -> "Adding pictures…"
                 else -> ""
