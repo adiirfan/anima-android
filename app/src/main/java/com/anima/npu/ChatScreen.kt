@@ -58,11 +58,14 @@ import java.util.Date
 fun ChatScreen(chat: ChatController, lingInstalled: Boolean, onDownload: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
     val ctx = LocalContext.current
     if (!lingInstalled && !LocalLing.ready(ctx)) {
+        val small = LocalLing.small(ctx)
         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Chat needs Ling", style = MaterialTheme.typography.titleMedium)
-            Text("Ling-3.0-tiny runs on the phone's AI chip and can add pictures to the queue for you. " +
-                "It is a 4.5 GB download.")
-            Button(onClick = onDownload) { Text("Download Ling") }
+            Text("Chat needs ${LocalLing.name(ctx)}", style = MaterialTheme.typography.titleMedium)
+            Text(if (small) "Qwen3.5 0.8B is the small chat model (the Lowest setting). It runs on the phone's AI " +
+                    "chip and can add pictures to the queue for you. It is a 0.8 GB download."
+                else "Ling-3.0-tiny runs on the phone's AI chip and can add pictures to the queue for you. " +
+                    "It is a 4.5 GB download. (Settings has a smaller model for phones short of memory.)")
+            Button(onClick = onDownload) { Text("Download ${LocalLing.name(ctx)}") }
         }
         return
     }
@@ -108,7 +111,7 @@ fun ChatScreen(chat: ChatController, lingInstalled: Boolean, onDownload: () -> U
             Spacer(Modifier.weight(1f))
             val lingState = when (turn.phase) {
                 "waiting" -> "Waiting for the current picture…"
-                "loading" -> "Loading Ling…"
+                "loading" -> "Loading ${LocalLing.name(ctx)}…"
                 "preparing" -> "Preparing Ling for low memory (first time, about a minute)…"
                 "thinking" -> "Thinking…"
                 "tool" -> "Adding pictures…"

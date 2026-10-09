@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The chat model's server runs on the phone and speaks plain HTTP on the loopback address. Android refuses plain
+     HTTP by default; the Samsung let loopback through anyway, the iQOO 13 did not ("Cleartext HTTP traffic to
+     127.0.0.1 not permitted", 2026-10-09). Only the phone itself is allowed; everything else stays HTTPS-only. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

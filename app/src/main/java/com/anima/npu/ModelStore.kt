@@ -39,7 +39,11 @@ class ModelStore(
             "ling", "Ling-3.0-tiny (chat)",
             "Ling-3.0-tiny is released by inclusionAI under the MIT licence.",
             "https://huggingface.co/sebekblessing/anima-qnn-8elite/resolve/main/ling/manifest.json", "ling/")
-        val ALL = listOf(ANIMA, KLEIN, QWEN, LING)
+        val SMALLCHAT = ModelStore(
+            "smallchat", "Qwen3.5 0.8B (small chat)",
+            "Qwen3.5 0.8B is released by the Qwen team (Alibaba) under the Apache 2.0 licence.",
+            "https://huggingface.co/sebekblessing/anima-qnn-8elite/resolve/main/smallchat/manifest.json", "smallchat/")
+        val ALL = listOf(ANIMA, KLEIN, QWEN, LING, SMALLCHAT)
         /** The picture models, for the Create screen's picker. */
         val PICTURE = listOf(ANIMA, KLEIN, QWEN)
         fun byId(id: String) = ALL.first { it.id == id }

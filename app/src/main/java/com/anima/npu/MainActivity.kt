@@ -234,7 +234,7 @@ class MainActivity : ComponentActivity() {
                                     TextButton(onClick = { lifecycleScope.launch { AppUpdate.install(ctx) {
                                         when {
                                             QueueService.running -> "A picture is drawing"
-                                            Chat.busy() -> "Ling is answering"
+                                            Chat.busy() -> "${LocalLing.name(ctx)} is answering"
                                             else -> null
                                         }
                                     } } },
@@ -308,8 +308,8 @@ class MainActivity : ComponentActivity() {
                                     Engines.setMemoryMode(m)
                                 }
                             }
-                            tab == 1 -> ChatScreen(Chat.get(ctx), lingInstalled = installedOf["ling"] != null,
-                                onDownload = { downloadFor = "ling" }, onOpen = { open = it })
+                            tab == 1 -> ChatScreen(Chat.get(ctx), lingInstalled = installedOf[LocalLing.store(ctx).id] != null,
+                                onDownload = { downloadFor = LocalLing.store(ctx).id }, onOpen = { open = it })
                             tab == 3 -> SettingsScreen()
                             else -> GalleryGrid(onOpen = { open = it })
                         }

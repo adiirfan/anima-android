@@ -102,7 +102,7 @@ class QueueService : Service() {
                 // screen locks, and so pictures it asks for start at once
                 val j = Queue.store.nextWaiting() ?: if (Chat.busy()) {
                     _progress.value = "" to ""
-                    nm.notify(ID_WORK, working("Ling is answering…", 0, 0))
+                    nm.notify(ID_WORK, working("${LocalLing.name(this)} is answering…", 0, 0))
                     if (!wl.isHeld) wl.acquire(10 * 60_000L)
                     delay(300)
                     continue

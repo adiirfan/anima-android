@@ -1,6 +1,7 @@
 package com.anima.npu
 
 import android.content.Context
+import android.net.Uri
 import android.graphics.Bitmap
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -81,7 +82,7 @@ class ChatController(ctx: Context) {
                 // here (the chat holds the chip), so they can go.
                 if (smallMemory(app)) Engines.release()
                 if (!LocalLing.start(app)) {
-                    append(id, Msg.Assistant(newId(), "Ling could not start: ${LocalLing.lastLog}", ""))
+                    append(id, Msg.Assistant(newId(), "${LocalLing.name(app)} could not start: ${LocalLing.lastLog}", ""))
                     return@withChat
                 }
             }
@@ -126,7 +127,7 @@ class ChatController(ctx: Context) {
                 }
             }
         } catch (e: Exception) {
-            append(id, Msg.Assistant(newId(), text.toString().ifBlank { "Ling stopped answering: ${e.message}" }, thought.toString()))
+            append(id, Msg.Assistant(newId(), text.toString().ifBlank { "${LocalLing.name(app)} stopped answering: ${e.message}" }, thought.toString()))
             return null
         }
         if (text.isNotBlank() || thought.isNotBlank()) append(id, Msg.Assistant(newId(), text.toString().trim(), thought.toString().trim()))
@@ -139,14 +140,22 @@ class ChatController(ctx: Context) {
         var ok = false
         var lastBad = ""
         val c = store.get(id) ?: return false to ""
-        val lastImage = c.msgs.lastOrNull { it is Msg.User }?.let { (it as Msg.User).imageFile }
+        val target = newestPicture(c)
+        // The models do not always set "edit": Ling wrote "Edit the attached picture: change the hair to black" with
+        // edit off and drew a new picture from the words alone (S25 Edge, 2026-10-09). A picture attached to this
+        // message, or the word "edit" in it, makes the call an edit of the newest picture whatever the model said.
+        val said = c.msgs.lastOrNull { it is Msg.User } as Msg.User?
+        val wantsEdit = said != null && (said.imageFile != null || Regex("\\bedit", RegexOption.IGNORE_CASE).containsMatchIn(said.text))
         for (k in calls) {
             append(id, Msg.ToolCall(newId(), k.id, k.name, k.args.toString()))
             val result = if (k.name != "draw_picture") JSONObject().put("error", "Unknown tool ${k.name}; use draw_picture.")
-            else when (val r = checkDraw(k.args.toString(), lastImage != null, ModelStore.QWEN.installed(app) == "standard",
+            else when (val r = checkDraw(
+                    if (wantsEdit && target.first != null) runCatching { JSONObject(k.args.toString()).put("edit", true).toString() }
+                        .getOrDefault(k.args.toString()) else k.args.toString(),
+                    target.second, ModelStore.QWEN.installed(app) == "standard",
                     ModelStore.PICTURE.filter { it.installed(app) != null }.map { it.id }.toSet())) {
                 is ToolCheck.Ok -> {
-                    val jobs = enqueueFromChat(id, r.args, if (r.args.edit) lastImage else null)
+                    val jobs = enqueueFromChat(id, r.args, if (r.args.edit) target.first else null)
                     jobs.forEach { j -> append(id, Msg.Picture(newId(), j.id)) }
                     ok = true
                     JSONObject().put("queued", jobs.size).put("position", Queue.store.waitingCount())
@@ -158,15 +167,48 @@ class ChatController(ctx: Context) {
         return ok to lastBad
     }
 
-    private fun enqueueFromChat(convId: String, a: DrawArgs, image: String?): List<Job> {
+    /** A picture in the conversation: one the user attached (a file in the chat folder) or one a draw_picture made. */
+    private sealed class Pic {
+        data class Attached(val file: String) : Pic()
+        data class Drawn(val uri: String) : Pic()
+    }
+
+    /**
+     * What an edit changes: the newest picture in the conversation, whether the user attached it or the chat drew it,
+     * so "make it night" works on the picture that just arrived without saving and attaching it. Pictures that failed
+     * or were cancelled are passed over. Returns (picture, null) or (null, why there is none for the model to say).
+     */
+    private fun newestPicture(c: Conversation): Pair<Pic?, String?> {
+        for (m in c.msgs.asReversed()) when (m) {
+            is Msg.User -> if (m.imageFile != null) return Pic.Attached(m.imageFile) to null
+            is Msg.Picture -> {
+                val j = Queue.store.get(m.jobId) ?: continue
+                when (j.state) {
+                    JobState.DONE -> if (j.resultUri != null) return Pic.Drawn(j.resultUri) to null
+                    JobState.WAITING, JobState.DRAWING -> return null to
+                        "The newest picture is still being drawn; it can be edited once it has arrived. Tell the user."
+                    else -> {}
+                }
+            }
+            else -> {}
+        }
+        return null to "There is no picture in this chat to edit. Ask the user to attach one or to ask for a new picture."
+    }
+
+    private fun enqueueFromChat(convId: String, a: DrawArgs, image: Pic?): List<Job> {
         val drawing = app.getSharedPreferences("anima", Context.MODE_PRIVATE).getString("qwenDrawing", "qwen") ?: "qwen"
         val shape = when (a.size) { "portrait" -> 1; "landscape" -> 2; else -> 0 }
         return (1..a.count).map {
             val jid = UUID.randomUUID().toString().take(12)
-            // the attached picture is copied beside the queue file, as the Create screen does
-            val src = image?.let { name ->
+            // the picture to edit is copied beside the queue file, as the Create screen does
+            val src = image?.let { p ->
                 val dst = "$jid-src.png"
-                File(store.dir(), name).copyTo(File(Queue.dir(app), dst), overwrite = true)
+                val out = File(Queue.dir(app), dst)
+                when (p) {
+                    is Pic.Attached -> File(store.dir(), p.file).copyTo(out, overwrite = true)
+                    // a finished picture lives in the phone's gallery; the drawer reads any picture format
+                    is Pic.Drawn -> app.contentResolver.openInputStream(Uri.parse(p.uri))!!.use { i -> out.outputStream().use { i.copyTo(it) } }
+                }
                 dst
             }
             val j = Job(jid, System.currentTimeMillis(), a.model, drawing, a.prompt, Random.nextLong(0, 1_000_000_000),

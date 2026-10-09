@@ -18,8 +18,18 @@ object LocalLing {
     const val PORT = 8282
     const val BASE_URL = "http://127.0.0.1:$PORT"
     const val FILE = "Ling-3.0-tiny-Q4_0-npu2.gguf"
+    const val SMALL_FILE = "Qwen3.5-0.8B-Q8_0.gguf"
+    /** The "lingExperts" setting that picks the small chat model (Qwen3.5 0.8B) instead of Ling. */
+    const val SMALL = -1
 
-    fun modelFile(ctx: Context) = File(ModelStore.LING.modelDir(ctx), FILE)
+    /** The Lowest memory setting: Qwen3.5 0.8B instead of Ling, about 1.4 GB in all instead of 2.3 to 4.9. */
+    fun small(ctx: Context) = expertSlots(ctx) == SMALL
+    fun store(ctx: Context) = if (small(ctx)) ModelStore.SMALLCHAT else ModelStore.LING
+    /** The chat model's name, for the screen. */
+    fun name(ctx: Context) = if (small(ctx)) "Qwen3.5 0.8B" else "Ling"
+
+    fun modelFile(ctx: Context) =
+        if (small(ctx)) File(ModelStore.SMALLCHAT.modelDir(ctx), SMALL_FILE) else File(ModelStore.LING.modelDir(ctx), FILE)
     /** The experts repacked for the AI chip, read in as needed when streaming (made on the first start, 3.9 GB). */
     fun expertFile(ctx: Context) = File(ModelStore.LING.modelDir(ctx), "Ling-3.0-tiny-Q4_0-npu2.experts")
 
@@ -60,7 +70,8 @@ object LocalLing {
     fun start(ctx: Context, say: (String) -> Unit = {}): Boolean {
         if (running() && answers()) return true
         stop()
-        if (!ready(ctx)) { say("Ling is not downloaded yet"); return false }
+        if (!ready(ctx)) { say("${name(ctx)} is not downloaded yet"); return false }
+        val small = small(ctx)
         // Programs may only be run from the folder Android unpacks the libraries into, which is also where the chip
         // loads its own half of the work from.
         val libs = ctx.applicationInfo.nativeLibraryDir
@@ -68,11 +79,20 @@ object LocalLing {
             "$libs/libllama-server.so", "-m", modelFile(ctx).absolutePath,
             // the AI chip; without this it quietly uses the processor
             "--device", "HTP0", "-ngl", "99",
-            // 2048-word batches read a long prompt fastest on the chip (575 -> 633 words/s measured)
-            "-c", "8192", "-b", "2048", "-ub", "2048",
+            // one conversation at a time: the default 4 slots only cost memory
+            "-c", "8192", "-np", "1",
             "--host", "127.0.0.1", "--port", PORT.toString(), "--alias", "ling",
-            // the chat template carries Ling's tool-call format
-            "--jinja", "--no-webui", "--temp", "1.0", "--top-p", "0.95", "--top-k", "20",
+            // the chat template carries the model's tool-call format
+            "--jinja", "--no-webui",
+        ) + if (small) listOf(
+            // 512-word batches: 0.26 GB less than 2048 and faster to read on the chip (1962 vs 1534 words/s, iQOO 13)
+            "-b", "512", "-ub", "512",
+            // Qwen's suggested sampling without thinking
+            "--temp", "0.7", "--top-p", "0.8", "--top-k", "20",
+        ) else listOf(
+            // 2048-word batches read a long prompt fastest on the chip (575 -> 633 words/s measured)
+            "-b", "2048", "-ub", "2048",
+            "--temp", "1.0", "--top-p", "0.95", "--top-k", "20",
         )
         val pb = ProcessBuilder(cmd)
         // llama.cpp asks for the graphics chip's library, which lives with the phone's firmware, whether or not it is
@@ -88,7 +108,7 @@ object LocalLing {
         }
         pb.redirectErrorStream(true)
         val started = try { pb.start() } catch (e: Exception) {
-            keep("could not start: ${e.message}"); say("Could not start Ling: ${e.message}"); return false
+            keep("could not start: ${e.message}"); say("Could not start ${name(ctx)}: ${e.message}"); return false
         }
         proc = started
         Thread {
@@ -98,18 +118,18 @@ object LocalLing {
                 }
             }
         }.apply { isDaemon = true }.start()
-        say("Loading Ling…")
+        say("Loading ${name(ctx)}…")
         val until = System.currentTimeMillis() + 180_000
         while (System.currentTimeMillis() < until) {
             if (!started.isAlive) {
                 proc = null
-                say("Ling stopped while loading: $lastLog")
+                say("${name(ctx)} stopped while loading: $lastLog")
                 return false
             }
             if (answers()) { Log.i("ling", "ready"); return true }
             Thread.sleep(300)
         }
-        say("Ling did not become ready: $lastLog")
+        say("${name(ctx)} did not become ready: $healthError / $lastLog")
         stop()
         return false
     }
@@ -131,7 +151,11 @@ object LocalLing {
         val code = c.responseCode
         c.disconnect()
         code in 200..299
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        healthError = e.toString()
         false
     }
+
+    /** Why the last readiness check failed (shown if it never comes up: the iQOO refused plain HTTP to itself). */
+    @Volatile private var healthError = ""
 }

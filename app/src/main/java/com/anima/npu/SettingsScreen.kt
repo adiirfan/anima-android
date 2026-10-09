@@ -33,15 +33,18 @@ fun SettingsScreen() {
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Settings", style = MaterialTheme.typography.titleLarge)
 
-        Text("Ling's memory use (chat)", style = MaterialTheme.typography.titleSmall)
-        // (pool size, label, what it means): measured on the S25 Edge, 2026-10-09; 48 estimated
+        Text("Chat model and memory use", style = MaterialTheme.typography.titleSmall)
+        // (setting, label, what it means): memory and speed measured on the iQOO 13, 2026-10-09
         val choices = listOf(
-            Triple(0, "Fastest", "Everything stays on the AI chip: about 4.5 GB of memory locked while Ling runs, " +
-                "writes about 25 words a second."),
+            Triple(0, "Fastest", "Ling, with everything on the AI chip: about 4.9 GB of memory while it runs, " +
+                "writes about 31 words a second."),
             Triple(48, "Balanced", "Ling keeps 48 of each layer's 128 experts on the AI chip and reads the rest from " +
-                "storage as needed: about 2.3 GB, a little slower to write."),
-            Triple(32, "Low memory", "Ling keeps 32 experts per layer on the AI chip: about 1.9 GB, writes about 13 " +
-                "words a second and reads long messages more slowly. Leaves the most room for other apps."),
+                "storage as needed: about 2.6 GB, writes about 15 words a second."),
+            Triple(32, "Low", "Ling keeps 32 experts per layer on the AI chip: about 2.3 GB, writes about 14 " +
+                "words a second and reads long messages more slowly."),
+            Triple(LocalLing.SMALL, "Lowest", "A much smaller model, Qwen3.5 0.8B, instead of Ling: about 1.4 GB, " +
+                "writes about 25 words a second. Less clever: it sometimes answers in words when you asked for a " +
+                "picture, so ask again or say \"draw\". A 0.8 GB download, offered on the Chat tab."),
         )
         var slots by remember { mutableIntStateOf(LocalLing.expertSlots(ctx)) }
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -53,7 +56,7 @@ fun SettingsScreen() {
         }
         Text(choices.first { it.first == slots }.third, style = MaterialTheme.typography.bodySmall)
         if (slots > 0) {
-            Text("Balanced and Low memory keep a 3.9 GB copy of Ling's experts next to the model, made the first " +
+            Text("Balanced and Low keep a 3.9 GB copy of Ling's experts next to the model, made the first " +
                 "time Ling starts (about a minute). Choosing Fastest deletes it.", style = MaterialTheme.typography.bodySmall)
         }
         Text("Takes effect with the next chat message.", style = MaterialTheme.typography.bodySmall)

@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION" />
     <application
         android:label="Anima"
+        android:networkSecurityConfig="@xml/network_security"
         android:extractNativeLibs="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <!-- Qualcomm's neural-unit library is opened from the app's library folder. -->
