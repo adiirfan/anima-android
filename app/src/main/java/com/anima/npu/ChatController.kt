@@ -74,6 +74,11 @@ class ChatController(ctx: Context) {
         NpuGate.gate.withChat {
             if (!LocalLing.running()) {
                 _state.value = TurnState(id, "loading", "", "")
+                // The picture models stay loaded after a picture (2.7 GB on the AI chip). With Ling's 4.5 GB on top,
+                // a 12 GB phone ran out and Android closed the app while on screen: it cannot close Ling's server,
+                // a program of its own, so it closes everything else (S25 Edge, 2026-10-09). No picture is drawing
+                // here (the chat holds the chip), so they can go.
+                if (smallMemory(app)) Engines.release()
                 if (!LocalLing.start(app)) {
                     append(id, Msg.Assistant(newId(), "Ling could not start: ${LocalLing.lastLog}", ""))
                     return@withChat
@@ -195,6 +200,13 @@ class ChatController(ctx: Context) {
     private fun save(c: Conversation) { store.save(c); changed.value++ }
 
     private fun newId() = UUID.randomUUID().toString().take(8)
+}
+
+/** Phones under 14 GB cannot hold Ling and the picture models at once. */
+fun smallMemory(ctx: Context): Boolean {
+    val mi = android.app.ActivityManager.MemoryInfo()
+    (ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mi)
+    return mi.totalMem < 14L * 1024 * 1024 * 1024
 }
 
 /** One chat for the whole app, so a reply keeps going when the screen is rebuilt or left. */

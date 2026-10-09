@@ -149,6 +149,9 @@ class QueueService : Service() {
             }
         } finally {
             if (wl.isHeld) wl.release()
+            // the queue is empty: on a 12 GB phone give the picture models' memory back (the next picture reloads
+            // them, a few seconds), or a chat message right after starts Ling on top of them
+            if (smallMemory() && Queue.store.waitingCount() == 0) Engines.release()
             running = false
             _progress.value = "" to ""
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -156,11 +159,7 @@ class QueueService : Service() {
         }
     }
 
-    private fun smallMemory(): Boolean {
-        val mi = android.app.ActivityManager.MemoryInfo()
-        (getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mi)
-        return mi.totalMem < 14L * 1024 * 1024 * 1024
-    }
+    private fun smallMemory(): Boolean = smallMemory(this)
 
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
 }
