@@ -1,0 +1,115 @@
+package com.anima.npu
+
+import android.content.Context
+import android.util.Log
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+
+/**
+ * Ling-3.0-tiny on the phone's AI chip, answering like an online chat service: llama.cpp's own server, started as a
+ * separate program and listening on the loopback address (the same arrangement as Gemma inside Mihon).
+ *
+ * A separate program rather than a library call: the chip work runs in its own process on the DSP either way, and a
+ * model that crashes takes its own program down instead of the app. The chat then speaks plain HTTP to it.
+ */
+object LocalLing {
+    /** Nothing else on the phone listens here (Mihon's Gemma uses 8181). */
+    const val PORT = 8282
+    const val BASE_URL = "http://127.0.0.1:$PORT"
+    const val FILE = "Ling-3.0-tiny-Q4_0-npu2.gguf"
+
+    fun modelFile(ctx: Context) = File(ModelStore.LING.modelDir(ctx), FILE)
+    fun ready(ctx: Context): Boolean = modelFile(ctx).length() > 0
+
+    @Volatile private var proc: Process? = null
+    private val ring = ArrayDeque<String>()
+
+    fun running(): Boolean = proc?.isAlive == true
+
+    /** The server's last line of output: shown when it fails to start. */
+    val lastLog: String get() = synchronized(ring) { ring.lastOrNull() ?: "" }
+    fun log(): List<String> = synchronized(ring) { ring.toList() }
+
+    private fun keep(line: String) = synchronized(ring) {
+        ring.addLast(line.take(300))
+        while (ring.size > 50) ring.removeFirst()
+    }
+
+    /**
+     * Start it if it is not already up, and wait until it answers (blocking, up to 180 s; opening takes about 10 s).
+     * [say] gets progress lines for the screen.
+     */
+    @Synchronized
+    fun start(ctx: Context, say: (String) -> Unit = {}): Boolean {
+        if (running() && answers()) return true
+        stop()
+        if (!ready(ctx)) { say("Ling is not downloaded yet"); return false }
+        // Programs may only be run from the folder Android unpacks the libraries into, which is also where the chip
+        // loads its own half of the work from.
+        val libs = ctx.applicationInfo.nativeLibraryDir
+        val cmd = listOf(
+            "$libs/libllama-server.so", "-m", modelFile(ctx).absolutePath,
+            // the AI chip; without this it quietly uses the processor
+            "--device", "HTP0", "-ngl", "99",
+            // 2048-word batches read a long prompt fastest on the chip (575 -> 633 words/s measured)
+            "-c", "8192", "-b", "2048", "-ub", "2048",
+            "--host", "127.0.0.1", "--port", PORT.toString(), "--alias", "ling",
+            // the chat template carries Ling's tool-call format
+            "--jinja", "--no-webui", "--temp", "1.0", "--top-p", "0.95", "--top-k", "20",
+        )
+        val pb = ProcessBuilder(cmd)
+        // llama.cpp asks for the graphics chip's library, which lives with the phone's firmware, whether or not it is
+        // used: without these folders on the path the program does not start at all. The system folder goes before
+        // the vendor's: the vendor's older libc++.so lacks symbols the Samsung's (Android 16) system liblog.so needs.
+        pb.environment()["LD_LIBRARY_PATH"] = "$libs:/system/lib64:/vendor/lib64:/system/vendor/lib64"
+        pb.environment()["ADSP_LIBRARY_PATH"] = libs
+        pb.redirectErrorStream(true)
+        val started = try { pb.start() } catch (e: Exception) {
+            keep("could not start: ${e.message}"); say("Could not start Ling: ${e.message}"); return false
+        }
+        proc = started
+        Thread {
+            runCatching {
+                started.inputStream.bufferedReader().forEachLine { line ->
+                    if (line.isNotBlank()) { keep(line); Log.i("ling", line.take(300)) }
+                }
+            }
+        }.apply { isDaemon = true }.start()
+        say("Loading Ling…")
+        val until = System.currentTimeMillis() + 180_000
+        while (System.currentTimeMillis() < until) {
+            if (!started.isAlive) {
+                proc = null
+                say("Ling stopped while loading: $lastLog")
+                return false
+            }
+            if (answers()) { Log.i("ling", "ready"); return true }
+            Thread.sleep(300)
+        }
+        say("Ling did not become ready: $lastLog")
+        stop()
+        return false
+    }
+
+    /** Stops the server and gives its memory back (the image engines may need it on a 12 GB phone). */
+    @Synchronized
+    fun stop() {
+        val p = proc ?: return
+        proc = null
+        runCatching { p.destroy() }
+        runCatching { p.waitFor() }
+    }
+
+    /** Whether it is up and answering yet (503 while the model loads). */
+    private fun answers(): Boolean = try {
+        val c = URL("$BASE_URL/health").openConnection() as HttpURLConnection
+        c.connectTimeout = 500
+        c.readTimeout = 1000
+        val code = c.responseCode
+        c.disconnect()
+        code in 200..299
+    } catch (_: Exception) {
+        false
+    }
+}

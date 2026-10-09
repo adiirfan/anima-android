@@ -1,0 +1,18 @@
+{
+ "base": "https://huggingface.co/adiirfan01/anima-qnn-8elite/resolve/main/ling/",
+ "shared": [],
+ "variants": {
+  "standard": {
+   "label": "Standard",
+   "about": "Ling-3.0-tiny, 4-bit, on the AI chip. About 4.5 GB.",
+   "files": [
+    {
+     "path": "Ling-3.0-tiny-Q4_0-npu2.gguf",
+     "name": "Ling-3.0-tiny-Q4_0-npu2.gguf",
+     "size": 4482970528,
+     "sha256": "de14be791a5d1b4367cd400551cb42c20d3f71a04a68a551e2372deab52766a8"
+    }
+   ]
+  }
+ }
+}

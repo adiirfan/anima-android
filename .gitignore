@@ -1,0 +1,24 @@
+.gradle/
+build/
+app/build/
+app/.cxx/
+local.properties
+*.apk
+*.idsig
+.idea/
+*.iml
+__pycache__/
+
+# phone test programs built by tools/build_cli.sh
+tools/qnn_cli
+tools/pipe_cli
+tools/klein_cli
+tools/gemma_cli
+tools/qimg_cli
+tools/loadtest
+
+
+# llama.cpp server for the chat, copied in by tools/pack-llama.sh
+app/src/main/jniLibs/arm64-v8a/libllama*.so
+app/src/main/jniLibs/arm64-v8a/libggml*.so
+app/src/main/jniLibs/arm64-v8a/libmtmd*.so
