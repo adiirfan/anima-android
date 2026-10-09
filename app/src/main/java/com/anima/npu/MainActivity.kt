@@ -34,12 +34,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.runtime.collectAsState
-import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.Badge
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -223,6 +225,31 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val drawer = rememberDrawerState(DrawerValue.Closed)
+                val navScope = rememberCoroutineScope()
+                val openMenu: () -> Unit = { navScope.launch { drawer.open() } }
+                // The pages live in a side menu, as in sysmon's phone app, instead of a bar along the bottom that
+                // took a strip of every screen (2026-10-09).
+                fun go(t: Int) { downloadFor = null; updating = false; showQueue = false; open = null; tab = t; navScope.launch { drawer.close() } }
+                ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = open == null, drawerContent = {
+                    ModalDrawerSheet(Modifier.safeDrawingPadding()) {
+                        Text("Anima", Modifier.padding(start = 28.dp, top = 20.dp, bottom = 16.dp),
+                            style = MaterialTheme.typography.titleLarge)
+                        val qTick by Queue.store.changed.collectAsState()
+                        val waiting = remember(qTick) { Queue.store.waitingCount() }
+                        @Composable fun item(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean,
+                                             badge: Int = 0, onClick: () -> Unit) =
+                            NavigationDrawerItem(label = { Text(label) }, selected = selected, onClick = onClick,
+                                icon = { Icon(icon, null) }, badge = { if (badge > 0) Text("$badge") },
+                                modifier = Modifier.padding(horizontal = 12.dp))
+                        val here = downloadFor == null && open == null && !showQueue
+                        item("Create", AppIcons.Create, here && tab == 0) { go(0) }
+                        item("Chat", AppIcons.Chat, here && tab == 1) { go(1) }
+                        item("Gallery", AppIcons.Gallery, here && tab == 2) { go(2) }
+                        item("Queue", AppIcons.Queue, showQueue, badge = waiting) { go(0); showQueue = true }
+                        item("Settings", AppIcons.Settings, here && tab == 3) { go(3) }
+                    }
+                }) {
                 Scaffold(
                     modifier = Modifier.safeDrawingPadding(),
                     topBar = {
@@ -246,23 +273,6 @@ class MainActivity : ComponentActivity() {
                             UsageMonitor()
                         }
                     },
-                    bottomBar = {
-                        // stays during a model download: the download runs in Installer, not in its screen
-                        if (open == null && installedOf.values.any { it != null }) NavigationBar {
-                            val leave = { downloadFor = null; updating = false }
-                            val qTick by Queue.store.changed.collectAsState()
-                            val waiting = remember(qTick) { Queue.store.waitingCount() }
-                            NavigationBarItem(selected = tab == 0 && downloadFor == null, onClick = { leave(); showQueue = false; tab = 0 },
-                                icon = { BadgedBox(badge = { if (waiting > 0) Badge { Text("$waiting") } }) { Text("✦") } },
-                                label = { Text("Create") })
-                            NavigationBarItem(selected = tab == 1 && downloadFor == null, onClick = { leave(); showQueue = false; tab = 1 },
-                                icon = { Text("✉") }, label = { Text("Chat") })
-                            NavigationBarItem(selected = tab == 2 && downloadFor == null, onClick = { leave(); showQueue = false; tab = 2 },
-                                icon = { Text("▦") }, label = { Text("Gallery") })
-                            NavigationBarItem(selected = tab == 3 && downloadFor == null, onClick = { leave(); showQueue = false; tab = 3 },
-                                icon = { Text("⚙") }, label = { Text("Settings") })
-                        }
-                    },
                 ) { pad ->
                     Box(Modifier.padding(pad).fillMaxSize()) {
                         when {
@@ -282,7 +292,8 @@ class MainActivity : ComponentActivity() {
                                 sizeIndex(e.width, e.height)?.let { (t, k) -> create.tier = t; create.shape = k }
                                 open = null; tab = 0
                             })
-                            tab == 0 -> {
+                            tab == 0 -> Column {
+                                ChatBar(openMenu, "Create")
                                 val st = ModelStore.byId(create.model)
                                 val inst = installedOf[st.id]
                                 Create(create, Engines::ensureAnima, Engines::ensureKlein, { Engines.ensureQwen(create.qwenDrawing) },
@@ -308,12 +319,13 @@ class MainActivity : ComponentActivity() {
                                     Engines.setMemoryMode(m)
                                 }
                             }
-                            tab == 1 -> ChatScreen(Chat.get(ctx), lingInstalled = installedOf[LocalLing.store(ctx).id] != null,
-                                onDownload = { downloadFor = LocalLing.store(ctx).id }, onOpen = { open = it })
-                            tab == 3 -> SettingsScreen()
-                            else -> GalleryGrid(onOpen = { open = it })
+                            tab == 1 -> ChatScreen(Chat.get(ctx), isInstalled = { installedOf[it] != null },
+                                onDownload = { downloadFor = LocalLing.store(ctx).id }, onOpen = { open = it }, onMenu = openMenu)
+                            tab == 3 -> Column { ChatBar(openMenu, "Settings"); SettingsScreen() }
+                            else -> Column { ChatBar(openMenu, "Gallery"); GalleryGrid(onOpen = { open = it }) }
                         }
                     }
+                }
                 }
             }
         }
@@ -585,5 +597,11 @@ fun Detail(e: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit)
             }) { Text("Share") }
             OutlinedButton(onClick = { scope.launch(Dispatchers.IO) { Gallery.delete(ctx, e); withContext(Dispatchers.Main) { onBack() } } }) { Text("Delete") }
         }
+        // any picture as a home-screen icon: Android only lets the launcher icon itself be one of the built-in ones
+        OutlinedButton(onClick = {
+            val b = bmp ?: return@OutlinedButton
+            if (!AppIcon.pinPicture(ctx, b, e.seed.toString() + "-" + e.uri.lastPathSegment))
+                android.widget.Toast.makeText(ctx, "This launcher cannot add shortcuts", android.widget.Toast.LENGTH_SHORT).show()
+        }, enabled = bmp != null) { Text("Add to home screen as an icon") }
     }
 }

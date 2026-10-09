@@ -1,6 +1,15 @@
 package com.anima.npu
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,8 +40,6 @@ fun SettingsScreen() {
     val ctx = LocalContext.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Settings", style = MaterialTheme.typography.titleLarge)
-
         Text("Chat model and memory use", style = MaterialTheme.typography.titleSmall)
         // (setting, label, what it means): memory and speed measured on the iQOO 13, 2026-10-09
         val choices = listOf(
@@ -60,6 +67,21 @@ fun SettingsScreen() {
                 "time Ling starts (about a minute). Choosing Fastest deletes it.", style = MaterialTheme.typography.bodySmall)
         }
         Text("Takes effect with the next chat message.", style = MaterialTheme.typography.bodySmall)
+
+        HorizontalDivider()
+
+        Text("App icon", style = MaterialTheme.typography.titleSmall)
+        var icon by remember { mutableStateOf(AppIcon.current(ctx)) }
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            AppIcon.ALL.forEach { (alias, name, res) ->
+                Image(painterResource(res), name, Modifier.size(60.dp).clip(CircleShape)
+                    .border(if (icon == alias) 3.dp else 0.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                    .clickable { if (icon != alias) { icon = alias; AppIcon.set(ctx, alias) } },
+                    contentScale = ContentScale.Crop)
+            }
+        }
+        Text("Your launcher may take a few seconds to show the new icon. To use any picture instead, open it in the " +
+            "Gallery and tap \"Add to home screen as an icon\".", style = MaterialTheme.typography.bodySmall)
 
         HorizontalDivider()
 

@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION" />
     <application
         android:label="Anima"
+        android:icon="@mipmap/ic_silver"
+        android:roundIcon="@mipmap/ic_silver"
         android:networkSecurityConfig="@xml/network_security"
         android:extractNativeLibs="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
@@ -33,11 +35,56 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize" />
+        <!-- The app's icon in the launcher: one entry per built-in icon, only one switched on at a time (AppIcon.kt,
+             Settings > App icon), the way apps such as Reddit let you pick their icon. -->
+        <activity-alias
+            android:name=".IconSilver"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_silver"
+            android:roundIcon="@mipmap/ic_silver"
+            android:enabled="true"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconPink"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_pink"
+            android:roundIcon="@mipmap/ic_pink"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconBlack"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_black"
+            android:roundIcon="@mipmap/ic_black"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconBlonde"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_blonde"
+            android:roundIcon="@mipmap/ic_blonde"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>
