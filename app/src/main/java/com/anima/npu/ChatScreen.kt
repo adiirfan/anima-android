@@ -140,7 +140,7 @@ fun ChatScreen(chat: ChatController, isInstalled: (String) -> Boolean, onDownloa
     }
 
     Column(Modifier.fillMaxSize().imePadding()) {
-        ChatBar(onMenu, conv?.title ?: "New chat", if (mine) status else modelLabel(ctx, slots)) {
+        ChatBar(onMenu, conv?.title ?: "New chat", if (mine) status else modelLabel(ctx, slots), buttons = 2) {
             IconButton(onClick = { showList = true }) { Icon(AppIcons.Chats, "Chats") }
             var menu by remember { mutableStateOf(false) }
             Box {
@@ -232,9 +232,12 @@ fun ChatScreen(chat: ChatController, isInstalled: (String) -> Boolean, onDownloa
 
 /** The bar on top: the side menu, a title with a line under it, and the page's own buttons. */
 @Composable
-fun ChatBar(onMenu: () -> Unit, title: String, subtitle: String = "", actions: (@Composable () -> Unit)? = null) {
+fun ChatBar(onMenu: () -> Unit, title: String, subtitle: String = "", buttons: Int = 0,
+            actions: (@Composable () -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onMenu) { Icon(AppIcons.Menu, "Menu") }
+        // as wide on the left as the page's buttons on the right, so the title sits in the middle
+        if (buttons > 1) Spacer(Modifier.width((48 * (buttons - 1)).dp))
         Column(Modifier.weight(1f).padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle.isNotEmpty()) Text(subtitle, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,

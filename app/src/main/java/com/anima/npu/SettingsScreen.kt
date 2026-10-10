@@ -41,13 +41,14 @@ fun SettingsScreen() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Chat model and memory use", style = MaterialTheme.typography.titleSmall)
-        // (setting, label, what it means): memory and speed measured on the iQOO 13, 2026-10-09
+        // (setting, label, what it means): memory measured on the iQOO 13, 2026-10-09; Balanced and Low writing speeds
+        // on the S25 Edge, warm, after the 2026-10-10 streaming changes (were 15 and 14)
         val choices = listOf(
             Triple(0, "Fastest", "Ling, with everything on the AI chip: about 4.9 GB of memory while it runs, " +
                 "writes about 31 words a second."),
             Triple(48, "Balanced", "Ling keeps 48 of each layer's 128 experts on the AI chip and reads the rest from " +
-                "storage as needed: about 2.6 GB, writes about 15 words a second."),
-            Triple(32, "Low", "Ling keeps 32 experts per layer on the AI chip: about 2.3 GB, writes about 14 " +
+                "storage as needed: about 2.6 GB, writes about 21 words a second."),
+            Triple(32, "Low", "Ling keeps 32 experts per layer on the AI chip: about 2.3 GB, writes about 19 " +
                 "words a second and reads long messages more slowly."),
             Triple(LocalLing.SMALL, "Lowest", "A much smaller model, Qwen3.5 0.8B, instead of Ling: about 1.4 GB, " +
                 "writes about 25 words a second. Less clever: it sometimes answers in words when you asked for a " +

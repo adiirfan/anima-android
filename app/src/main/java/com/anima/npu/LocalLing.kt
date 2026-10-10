@@ -104,6 +104,10 @@ object LocalLing {
         if (slots > 0) {
             pb.environment()["GGML_HEXAGON_EXPERT_SLOTS"] = slots.toString()
             pb.environment()["GGML_HEXAGON_EXPERT_FILE"] = expertFile(ctx).absolutePath
+            // Low memory stops for the chip once per layer to see which experts it picked; watching for the answer
+            // instead of sleeping until woken wakes it far sooner: 14.8 -> 18.6 words/s on the S25 Edge (2026-10-10).
+            // Costs one busy core while Ling writes. The same switch gave Fastest only ~2%, so it stays off there.
+            pb.environment()["GGML_HEXAGON_OPPOLL"] = "1"
             if (!File(expertFile(ctx).path + ".done").isFile) say("Preparing Ling for low memory (first time, about a minute)…")
         }
         pb.redirectErrorStream(true)
