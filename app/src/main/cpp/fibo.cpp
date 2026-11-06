@@ -4,6 +4,7 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
 #include <chrono>
@@ -270,7 +271,25 @@ bool Fibo::generate(const std::vector<int32_t>& ids, uint64_t seed, const uint8_
         if (!err->empty()) return false;
         auto* b = (_Float16*)kb.p;
         for (int j = 0; j < T; j++) b[j] = j < n ? (_Float16)0.f : NEG;
+        // debugging: with a file "dump" in the model folder, the reader's taps and prep's outputs are saved to
+        // dump_out/ (raw fp16 named after the buffer, plus the word ids) to compare against the computer
+        // the reader must hand over all 15 layers Fibo reads; a missing one would reach prep as zeros
+        int taps = 0;
+        for (auto& b : bufs_) if (b.first.rfind("ft", 0) == 0) taps++;
+        if (taps != 15) LOGI("WARNING: the reader gave %d of Fibo's 15 layers: update the Fibo files", taps);
+        const bool dump = access((dir_ + "/dump").c_str(), F_OK) == 0;
+        auto save = [&](const std::string& prefix) {
+            mkdir((dir_ + "/dump_out").c_str(), 0777);
+            for (auto& b : bufs_)
+                if (b.first.rfind(prefix, 0) == 0)
+                    if (FILE* f = fopen((dir_ + "/dump_out/" + b.first + ".f16").c_str(), "wb")) { fwrite(b.second.p, 1, b.second.bytes, f); fclose(f); }
+        };
+        if (dump) {
+            save("ft"); save("kb");
+            if (FILE* f = fopen((dir_ + "/dump_out/ids.txt").c_str(), "w")) { for (int id : ids) fprintf(f, "%d\n", id); fclose(f); }
+        }
         if (!runFile("fprep.bin", err)) return false;
+        if (dump) { save("xg"); save("ck"); save("cv"); }
         Shm& g = bufs_["xg0"];   // "xg2" lands in stream buffer xg0; each step overwrites it, so keep a copy
         xg0.assign((const _Float16*)g.p, (const _Float16*)g.p + g.bytes / 2);
         for (auto it = bufs_.begin(); it != bufs_.end();) {   // the taps were read; free them
