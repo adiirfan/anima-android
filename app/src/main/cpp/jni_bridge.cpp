@@ -9,6 +9,7 @@
 #include "qimg.h"
 #include "fibo.h"
 #include "moss.h"
+#include "wan.h"
 
 namespace {
 Pipeline g_pipe;
@@ -20,6 +21,8 @@ Fibo* g_fibo = nullptr;        // Fibo 2.0 edit, created on first use
 FiboResult g_fiboLast;
 Moss* g_moss = nullptr;        // MOSS-Image, created on first use
 MossResult g_mossLast;
+Wan* g_wan = nullptr;          // Wan 2.2 (clips), created on first use
+WanResult g_wanLast;
 std::mutex g_mu;
 GenResult g_last;
 std::string g_error;
@@ -79,6 +82,7 @@ JNIEXPORT jintArray JNICALL Java_com_anima_npu_Engine_generate(JNIEnv* env, jobj
     if (g_qimg) g_qimg->release();   // one model on the neural unit at a time
     if (g_fibo) g_fibo->release();
     if (g_moss) g_moss->release();
+    if (g_wan) g_wan->release();
     g_last = g_pipe.generate(req, [&](int i, int n) { env->CallVoidMethod(progress, onStep, i, n); });
     g_error = g_last.error;
     if (g_releaseLater) { g_pipe.release(); g_releaseLater = false; }
@@ -171,6 +175,7 @@ JNIEXPORT jintArray JNICALL Java_com_anima_npu_Engine_kleinGenerate(JNIEnv* env,
     if (g_qimg) g_qimg->release();
     if (g_fibo) g_fibo->release();
     if (g_moss) g_moss->release();
+    if (g_wan) g_wan->release();
     g_kleinLast = g_klein.generate(req, [&](int i, int n) { env->CallVoidMethod(progress, onStep, i, n); });
     g_error = g_kleinLast.error;
     if (g_releaseLater) { g_pipe.release(); g_klein.release(); if (g_qimg) g_qimg->release(); g_releaseLater = false; }
@@ -215,6 +220,7 @@ JNIEXPORT jintArray JNICALL Java_com_anima_npu_Engine_qwenGenerate(JNIEnv* env, 
     g_klein.release();
     if (g_fibo) g_fibo->release();
     if (g_moss) g_moss->release();
+    if (g_wan) g_wan->release();
     std::vector<uint8_t> rgb;
     if (edit) {
         std::vector<int32_t> e = ints(env, edit);
@@ -259,6 +265,7 @@ JNIEXPORT void JNICALL Java_com_anima_npu_Engine_release(JNIEnv*, jobject) {
     if (g_qimg) g_qimg->release();
     if (g_fibo) g_fibo->release();
     if (g_moss) g_moss->release();
+    if (g_wan) g_wan->release();
 }
 
 // ---- Fibo 2.0 edit-turbo (fibo.h): its own model folder, changes a 768x768 picture following an instruction ----
@@ -329,6 +336,7 @@ JNIEXPORT jintArray JNICALL Java_com_anima_npu_Engine_mossGenerate(JNIEnv* env, 
     g_klein.release();
     if (g_qimg) g_qimg->release();
     if (g_fibo) g_fibo->release();
+    if (g_wan) g_wan->release();
     auto floats = [&](jfloatArray a) {
         std::vector<float> v(env->GetArrayLength(a));
         env->GetFloatArrayRegion(a, 0, (jsize)v.size(), v.data());
@@ -351,6 +359,54 @@ JNIEXPORT jintArray JNICALL Java_com_anima_npu_Engine_mossGenerate(JNIEnv* env, 
 // [prompt ms, drawing ms, decode ms, ms spent waiting for block files] of the last MOSS picture.
 JNIEXPORT jdoubleArray JNICALL Java_com_anima_npu_Engine_mossTimes(JNIEnv* env, jobject) {
     double t[4] = {g_mossLast.msText, g_mossLast.msSteps, g_mossLast.msDecode, g_mossLast.msLoadWait};
+    jdoubleArray r = env->NewDoubleArray(4);
+    env->SetDoubleArrayRegion(r, 0, 4, t);
+    return r;
+}
+
+// ---- Wan 2.2 TI2V-5B Turbo (wan.h): a 17-frame clip from a picture; the prompt arrives already read by llama.cpp ----
+
+JNIEXPORT jstring JNICALL Java_com_anima_npu_Engine_wanInit(JNIEnv* env, jobject, jstring modelDir, jstring libDir) {
+    std::lock_guard<std::mutex> l(g_mu);
+    delete g_wan;
+    g_wan = new Wan();
+    std::string err;
+    if (!g_wan->init(str(env, modelDir), str(env, libDir), &err)) return env->NewStringUTF(err.c_str());
+    return nullptr;
+}
+
+// frames * 768 * 768 ARGB pixels (frame after frame), or null (see lastError). rows: n x 4096 from the reader;
+// rgb: the start picture, 768 x 768 x 3 bytes. progress.onStep(i, 8) as step i starts (0 preparing, 9 decoding).
+JNIEXPORT jintArray JNICALL Java_com_anima_npu_Engine_wanGenerate(JNIEnv* env, jobject, jfloatArray rows, jbyteArray rgb,
+                                                                   jlong seed, jobject progress) {
+    std::lock_guard<std::mutex> l(g_mu);
+    if (!g_wan) { g_error = "Wan is not started"; return nullptr; }
+    g_pipe.release();      // one model on the neural unit at a time
+    g_klein.release();
+    if (g_qimg) g_qimg->release();
+    if (g_fibo) g_fibo->release();
+    if (g_moss) g_moss->release();
+    std::vector<float> r(env->GetArrayLength(rows));
+    env->GetFloatArrayRegion(rows, 0, (jsize)r.size(), r.data());
+    std::vector<uint8_t> px(env->GetArrayLength(rgb));
+    env->GetByteArrayRegion(rgb, 0, (jsize)px.size(), reinterpret_cast<jbyte*>(px.data()));
+    if (px.size() != 768u * 768u * 3u) { g_error = "the start picture must be 768x768"; return nullptr; }
+    jmethodID onStep = env->GetMethodID(env->GetObjectClass(progress), "onStep", "(II)V");
+    g_wanLast = WanResult();
+    std::string err;
+    bool ok = g_wan->generate(r.data(), (int)(r.size() / 4096), px.data(), (uint64_t)seed, &g_wanLast, &err,
+                              [&](int i, int n) { env->CallVoidMethod(progress, onStep, i, n); });
+    g_error = ok ? "" : err;
+    if (g_releaseLater) { g_pipe.release(); g_klein.release(); if (g_qimg) g_qimg->release(); g_wan->release(); g_releaseLater = false; }
+    if (!ok) return nullptr;
+    jintArray out = env->NewIntArray((jsize)g_wanLast.argb.size());
+    env->SetIntArrayRegion(out, 0, (jsize)g_wanLast.argb.size(), reinterpret_cast<const jint*>(g_wanLast.argb.data()));
+    return out;
+}
+
+// [prepare ms, drawing ms, decode ms, ms waiting for block files] of the last clip.
+JNIEXPORT jdoubleArray JNICALL Java_com_anima_npu_Engine_wanTimes(JNIEnv* env, jobject) {
+    double t[4] = {g_wanLast.msPrep, g_wanLast.msSteps, g_wanLast.msDecode, g_wanLast.msLoadWait};
     jdoubleArray r = env->NewDoubleArray(4);
     env->SetDoubleArrayRegion(r, 0, 4, t);
     return r;

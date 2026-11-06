@@ -93,5 +93,14 @@ fun SettingsScreen() {
             }
             Switch(StatsBar.shown(ctx), { StatsBar.set(ctx, it) })
         }
+
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Upscale every new picture 4×", style = MaterialTheme.typography.titleSmall)
+                Text("Each picture is made 4 times bigger before it is saved (768 becomes 3072), which adds a few " +
+                    "seconds. Uses the upscaler that comes with Anima. Clips are not upscaled.", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(Upscaler.auto(ctx), { Upscaler.setAuto(ctx, it) })
+        }
     }
 }

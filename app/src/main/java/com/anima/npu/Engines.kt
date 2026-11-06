@@ -20,6 +20,7 @@ object Engines {
     private var qwen: String? = null   // the Qwen drawing model it was started with ("qwen" or "noctq")
     private var fibo = false
     private var moss = false
+    private var wan = false
     var memoryMode = 1
         private set
     private var memOverride = -1
@@ -97,6 +98,16 @@ object Engines {
         }
     }
 
+    /** Wan 2.2 clips, from their own folder (the prompt reader is llama.cpp, started per clip by [WanReader]). */
+    suspend fun ensureWan(): String? = lock.withLock {
+        withContext(Dispatchers.Default) {
+            if (wan) return@withContext null
+            Engine.wanInit(ModelStore.WAN.modelDir(app).absolutePath, libDir)?.let { return@withContext it }
+            wan = true
+            null
+        }
+    }
+
     fun setMemoryMode(m: Int) {
         memoryMode = m
         if (anima) Engine.setMemoryMode(m)
@@ -105,7 +116,7 @@ object Engines {
 
     /** After a model download: the engine reads its files afresh next time. */
     fun invalidate(model: String) {
-        when (model) { "klein" -> klein = false; "qwen" -> qwen = null; "fibo" -> fibo = false; "moss" -> moss = false; else -> anima = false }
+        when (model) { "klein" -> klein = false; "qwen" -> qwen = null; "fibo" -> fibo = false; "moss" -> moss = false; "wan" -> wan = false; else -> anima = false }
     }
 
     fun release() = Engine.release()

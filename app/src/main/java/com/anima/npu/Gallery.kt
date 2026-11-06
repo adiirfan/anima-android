@@ -59,6 +59,40 @@ object Gallery {
         return e
     }
 
+    /** A clip as a looping GIF in Pictures/Anima; [frames]: w*h ARGB each. The entry's size is one frame's. */
+    fun saveGif(ctx: Context, frames: List<IntArray>, w: Int, h: Int, prompt: String, seed: Long, steps: Int, ms: Long): Entry {
+        val now = System.currentTimeMillis()
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "anima_${now}_$seed.gif")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/gif")
+            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Anima")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val r = ctx.contentResolver
+        val uri = r.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("could not create the clip file")
+        r.openOutputStream(uri)!!.use { GifWriter.write(it, frames, w, h) }
+        values.clear()
+        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+        r.update(uri, values, null, null)
+        val e = Entry(uri, prompt, seed, steps, ms, w, now, h)
+        write(ctx, read(ctx).apply { add(0, e) })
+        return e
+    }
+
+    /** Puts [bmp] in place of [old]: a new file with the same prompt, seed and place in the list; the old file is
+     *  deleted, and queue jobs that pointed at it point at the new one. */
+    fun replace(ctx: Context, old: Entry, bmp: Bitmap): Entry {
+        val e = save(ctx, bmp, old.prompt, old.seed, old.steps, old.ms).copy(savedAt = old.savedAt)
+        runCatching { ctx.contentResolver.delete(old.uri, null, null) }
+        write(ctx, read(ctx).filter { it.uri != old.uri && it.uri != e.uri }.toMutableList().apply { add(0, e) })
+        Queue.store.all().filter { it.resultUri == old.uri.toString() }.forEach { j ->
+            Queue.store.update(j.id) { it.copy(resultUri = e.uri.toString(), width = bmp.width, height = bmp.height) }
+        }
+        return e
+    }
+
+    fun isGif(ctx: Context, e: Entry) = runCatching { ctx.contentResolver.getType(e.uri) == "image/gif" }.getOrDefault(false)
+
     /** Newest first; entries whose picture was deleted elsewhere (e.g. in the phone's gallery) are dropped. */
     fun list(ctx: Context): List<Entry> {
         val all = read(ctx)

@@ -91,9 +91,10 @@ class CreateState {
     var qwenPrompt by mutableStateOf("A digital painting of a knight in silver armor holding a glowing sword in a dark forest, dramatic lighting.")
     var fiboPrompt by mutableStateOf("Make the sky stormy and dark")
     var mossPrompt by mutableStateOf("A lighthouse on a rocky cliff at sunset, waves crashing below, warm golden light.")
+    var wanPrompt by mutableStateOf("She smiles and turns her head slowly toward the camera, her hair moving in a light breeze.")
     var prompt: String
-        get() = when (model) { "klein" -> kleinPrompt; "qwen" -> qwenPrompt; "fibo" -> fiboPrompt; "moss" -> mossPrompt; else -> animaPrompt }
-        set(v) { when (model) { "klein" -> kleinPrompt = v; "qwen" -> qwenPrompt = v; "fibo" -> fiboPrompt = v; "moss" -> mossPrompt = v; else -> animaPrompt = v } }
+        get() = when (model) { "klein" -> kleinPrompt; "qwen" -> qwenPrompt; "fibo" -> fiboPrompt; "moss" -> mossPrompt; "wan" -> wanPrompt; else -> animaPrompt }
+        set(v) { when (model) { "klein" -> kleinPrompt = v; "qwen" -> qwenPrompt = v; "fibo" -> fiboPrompt = v; "moss" -> mossPrompt = v; "wan" -> wanPrompt = v; else -> animaPrompt = v } }
     var edit by mutableStateOf<Bitmap?>(null)  // Klein / Qwen: the picture to change (cropped per size); null = new picture
     var seed by mutableStateOf(Random.nextLong(0, 1_000_000_000))
     var seedLocked by mutableStateOf(false)  // the user typed a seed: keep it for the next jobs too
@@ -111,6 +112,25 @@ class CreateState {
     var guideStrength by mutableStateOf(1f)
     var guideEnd by mutableStateOf(0.5f)
     var genW by mutableIntStateOf(512)  // size of the last generated picture (the upscale input)
+    var clipUri by mutableStateOf<Uri?>(null)  // the shown result is a Wan clip (a GIF): played instead of [picture]
+}
+
+/** Plays an animated GIF from the gallery, looping. */
+@Composable
+fun GifPlayer(uri: Uri, modifier: Modifier = Modifier) {
+    val ctx = LocalContext.current
+    var d by remember(uri) { mutableStateOf<android.graphics.drawable.Drawable?>(null) }
+    LaunchedEffect(uri) {
+        d = withContext(Dispatchers.IO) {
+            runCatching { android.graphics.ImageDecoder.decodeDrawable(android.graphics.ImageDecoder.createSource(ctx.contentResolver, uri)) }.getOrNull()
+        }
+        (d as? android.graphics.drawable.AnimatedImageDrawable)?.apply { repeatCount = android.graphics.drawable.AnimatedImageDrawable.REPEAT_INFINITE; start() }
+    }
+    d?.let { dr ->
+        androidx.compose.ui.viewinterop.AndroidView(
+            factory = { c -> android.widget.ImageView(c).apply { adjustViewBounds = true; scaleType = android.widget.ImageView.ScaleType.FIT_CENTER } },
+            update = { it.setImageDrawable(dr) }, modifier = modifier)
+    }
 }
 
 // Picture sizes the drawing model is built for: per tier, one size per shape. Width/16 x height/16 (the patch
@@ -125,7 +145,8 @@ const val NOCTQ_DIR = "noctq"
 const val FIBO_TIME = "edits only · 4 steps · about 1 min 30 s"   // Fibo 2.0 edit-turbo, iQOO 13 2026-11-06
 const val MOSS_TIME = "8 steps · about 1 min 30 s"   // MOSS-Image SFT + 8-step DMD add-on, iQOO 13 2026-11-06
 /** The models that draw one 768x768 size only, with no size or memory choices. */
-val BIG_MODELS = setOf("qwen", "fibo", "moss")
+val BIG_MODELS = setOf("qwen", "fibo", "moss", "wan")
+const val WAN_TIME = "17 frames, a looping GIF · about 2 min on the iQOO 13"
 val SHAPES = listOf("Square", "Tall 9:16", "Wide 16:9")
 private val SIZES = listOf(
     listOf(512 to 512, 384 to 672, 672 to 384),
@@ -375,6 +396,7 @@ fun Create(
     val qwen = s.model == "qwen"
     val fibo = s.model == "fibo"
     val moss = s.model == "moss"
+    val wan = s.model == "wan"
     val big = s.model in BIG_MODELS   // one 768x768 size, no size or memory choices
     val anima = s.model == "anima"
     // the Small Qwen download reads prompts with the 2B and cannot edit pictures
@@ -400,6 +422,7 @@ fun Create(
                 Triple("anima", null, "Anima"), Triple("klein", null, "FLUX.2 klein"), Triple("qwen", "qwen", "Qwen-Image 2.1"),
                 Triple("qwen", "noctq", "Noct Q").takeIf { File(ModelStore.QWEN.modelDir(ctx), "$NOCTQ_DIR/sp31.bin").isFile },
                 Triple("fibo", null, "Fibo 2.0 (edits)"), Triple("moss", null, "MOSS-Image"),
+                Triple("wan", null, "Wan 2.2 (moving picture)"),
             )
         }
         var menu by remember { mutableStateOf(false) }
@@ -423,6 +446,7 @@ fun Create(
                 qwen -> " It draws 768×768 pictures from plain sentences and can edit your pictures (about 15 GB)."
                 fibo -> " It changes your pictures as you describe, at 768×768 (about 15 GB). It only edits."
                 moss -> " It draws 768×768 pictures from plain sentences in 8 steps (about 16 GB). It does not edit."
+                wan -> " It turns one of your pictures into a short looping GIF that moves as you describe."
                 else -> ""
             })
             Button(onClick = onDownload, enabled = !Installer.running) { Text("Download…") }
@@ -430,7 +454,7 @@ fun Create(
             return@Column
         }
         OutlinedTextField(s.prompt, { s.prompt = it }, Modifier.fillMaxWidth(),
-            label = { Text(if (fibo || !anima && !moss && !qwenSmall && s.edit != null) "What to change" else "Prompt") }, minLines = 3, enabled = !s.busy)
+            label = { Text(if (wan) "How the picture moves" else if (fibo || !anima && !moss && !qwenSmall && s.edit != null) "What to change" else "Prompt") }, minLines = 3, enabled = !s.busy)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 s.seed.toString(), { v -> v.toLongOrNull()?.let { s.seed = it; s.seedLocked = true } }, Modifier.width(170.dp),
@@ -462,14 +486,15 @@ fun Create(
             }
         }
         val (pw, ph) = if (big) 768 to 768 else pictureSize(if (klein) 0 else s.tier, s.shape)
-        Text("$pw×$ph · " + when { klein -> KLEIN_TIME; fibo -> FIBO_TIME; moss -> MOSS_TIME
+        Text("$pw×$ph · " + when { klein -> KLEIN_TIME; fibo -> FIBO_TIME; moss -> MOSS_TIME; wan -> WAN_TIME
             qwen -> if (s.qwenDrawing == "noctq") NOCTQ_TIME else QWEN_TIME; else -> SIZE_TIERS[s.tier].second },
             style = MaterialTheme.typography.bodySmall)
         if (qwenSmall) Text("Editing pictures needs the Standard Qwen download (Model: Change).", style = MaterialTheme.typography.bodySmall)
-        val fiboNeedsPicture = fibo && s.edit == null
-        if (fiboNeedsPicture) Text("Fibo only edits: choose a picture to edit below.", style = MaterialTheme.typography.bodySmall)
+        val fiboNeedsPicture = (fibo || wan) && s.edit == null
+        if (fiboNeedsPicture) Text(if (wan) "Choose the picture to bring to life below." else "Fibo only edits: choose a picture to edit below.",
+            style = MaterialTheme.typography.bodySmall)
         if (!anima && !qwenSmall && !moss) {   // MOSS only draws new pictures
-            Text(if (fibo) "Picture to edit: Fibo changes it as you describe"
+            Text(if (wan) "Picture to animate: it becomes the first frame" else if (fibo) "Picture to edit: Fibo changes it as you describe"
                 else "Picture to edit (optional): ${if (klein) "Klein" else "Qwen"} changes it as you describe")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 s.edit?.let { Image(it.asImageBitmap(), null, Modifier.size(72.dp), contentScale = ContentScale.Crop) }
@@ -478,7 +503,8 @@ fun Create(
                 if (s.edit != null) TextButton(onClick = { s.edit = null }, enabled = !s.busy) { Text("Remove") }
             }
             if (s.edit != null) Text((if (big) "It is cropped to a square." else "It is cropped to the shape above.") +
-                " Describe the change, e.g. \"make her hair red\".", style = MaterialTheme.typography.bodySmall)
+                if (wan) " Describe the movement, e.g. \"she waves and laughs\"." else " Describe the change, e.g. \"make her hair red\".",
+                style = MaterialTheme.typography.bodySmall)
         }
         if (anima) Text("Guide picture (optional): the layout and pose follow it, the prompt decides the rest")
         if (anima) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -537,13 +563,16 @@ fun Create(
             val bmp = withContext(Dispatchers.IO) { Gallery.full(ctx, e) } ?: return@LaunchedEffect
             s.shownJob = j.id
             s.picture = bmp; s.savedFor = bmp; s.genW = bmp.width; s.pictureMs = j.ms
+            s.clipUri = if (j.model == "wan") e.uri else null
             s.status = "Done in %.0f s · saved to the gallery".format(j.ms / 1000.0)
         }
         if (queueLine.isNotEmpty()) TextButton(onClick = onQueue) { Text(queueLine, style = MaterialTheme.typography.bodySmall) }
         if (s.status.isNotEmpty()) Text(s.status, style = MaterialTheme.typography.bodySmall)
         s.picture?.let { bmp ->
-            Image(bmp.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(bmp.width.toFloat() / bmp.height))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val clip = s.clipUri
+            if (clip != null) GifPlayer(clip, Modifier.fillMaxWidth().aspectRatio(bmp.width.toFloat() / bmp.height))
+            else Image(bmp.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(bmp.width.toFloat() / bmp.height))
+            if (clip == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
                     scope.launch(Dispatchers.IO) {
                         Gallery.save(ctx, bmp, s.prompt, s.seed, if (anima) s.steps else 4, s.pictureMs)
@@ -594,30 +623,63 @@ fun GalleryGrid(onOpen: (Gallery.Entry) -> Unit) {
 }
 
 @Composable
-fun Detail(e: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit) {
+fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    var e by remember(e0) { mutableStateOf(e0) }   // replaced by the upscaled picture's entry after Upscale
     var bmp by remember { mutableStateOf<Bitmap?>(null) }
     BackHandler(onBack = onBack)
-    LaunchedEffect(e) { bmp = withContext(Dispatchers.IO) { Gallery.full(ctx, e) } }
+    var gif by remember(e0) { mutableStateOf(false) }
+    var note by remember(e0) { mutableStateOf("") }
+    var upscaling by remember(e0) { mutableStateOf(false) }
+    LaunchedEffect(e) { bmp = withContext(Dispatchers.IO) { gif = Gallery.isGif(ctx, e); Gallery.full(ctx, e) } }
     Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         TextButton(onClick = onBack) { Text("‹ Back") }
-        bmp?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(it.width.toFloat() / it.height)) }
+        bmp?.let {
+            if (gif) GifPlayer(e.uri, Modifier.fillMaxWidth().aspectRatio(it.width.toFloat() / it.height))
+            else Image(it.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(it.width.toFloat() / it.height))
+        }
         Text(e.prompt)
-        Text("seed ${e.seed} · ${e.steps} steps · ${e.width}×${e.height}", style = MaterialTheme.typography.bodySmall)
+        Text("seed ${e.seed} · ${e.steps} steps · ${bmp?.width ?: e.width}×${bmp?.height ?: e.height}", style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { onUse(e) }) { Text("Use this prompt") }
             OutlinedButton(onClick = {
-                val send = Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, e.uri)
+                val send = Intent(Intent.ACTION_SEND).setType(if (gif) "image/gif" else "image/png").putExtra(Intent.EXTRA_STREAM, e.uri)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 ctx.startActivity(Intent.createChooser(send, "Share picture"))
             }) { Text("Share") }
-            OutlinedButton(onClick = { scope.launch(Dispatchers.IO) { Gallery.delete(ctx, e); withContext(Dispatchers.Main) { onBack() } } }) { Text("Delete") }
+            OutlinedButton(onClick = { scope.launch(Dispatchers.IO) { Gallery.delete(ctx, e); withContext(Dispatchers.Main) { onBack() } } },
+                enabled = !upscaling) { Text("Delete") }
         }
+        // 4x bigger, in place of this picture. Up to 1024 on the long side: 4x of more would not fit in memory.
+        val b = bmp
+        if (!gif && b != null && maxOf(b.width, b.height) <= 1024) {
+            OutlinedButton(onClick = {
+                upscaling = true
+                note = if (QueueService.progress.value.first.isNotEmpty()) "Upscaling after the picture being drawn…" else "Upscaling…"
+                // not this screen's scope: leaving the screen must not drop the bigger picture half way
+                Upscaler.scope.launch {
+                    val t = System.currentTimeMillis()
+                    val r = runCatching {
+                        val big = Upscaler.upscale(ctx, b)
+                        withContext(Dispatchers.IO) { Gallery.replace(ctx, e, big) } to big
+                    }
+                    withContext(Dispatchers.Main) {
+                        r.onSuccess { (ne, big) ->
+                            e = ne; bmp = big
+                            note = "Upscaled to ${big.width}×${big.height} in %.0f s; it replaced the original".format((System.currentTimeMillis() - t) / 1000.0)
+                        }.onFailure { note = "Could not upscale: ${it.message}" }
+                        upscaling = false
+                    }
+                }
+            }, enabled = !upscaling && Upscaler.available(ctx)) { Text("Upscale 4× (replaces this picture)") }
+            if (!Upscaler.available(ctx)) Text("The upscaler comes with Anima: download Anima to use it.", style = MaterialTheme.typography.bodySmall)
+        }
+        if (note.isNotEmpty()) Text(note, style = MaterialTheme.typography.bodySmall)
         // any picture as a home-screen icon: Android only lets the launcher icon itself be one of the built-in ones
         OutlinedButton(onClick = {
-            val b = bmp ?: return@OutlinedButton
-            if (!AppIcon.pinPicture(ctx, b, e.seed.toString() + "-" + e.uri.lastPathSegment))
+            val b2 = bmp ?: return@OutlinedButton
+            if (!AppIcon.pinPicture(ctx, b2, e.seed.toString() + "-" + e.uri.lastPathSegment))
                 android.widget.Toast.makeText(ctx, "This launcher cannot add shortcuts", android.widget.Toast.LENGTH_SHORT).show()
         }, enabled = bmp != null) { Text("Add to home screen as an icon") }
     }

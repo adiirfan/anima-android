@@ -61,6 +61,8 @@ private fun modelName(j: Job) = when (j.model) {
     "qwen" -> if (j.qwenDrawing == "noctq") "Noct Q" else "Qwen-Image"
     "fibo" -> "Fibo edit"
     "moss" -> "MOSS"
+    "wan" -> "Wan clip"
+    "upscale" -> "Upscale"
     "klein" -> "Klein"
     else -> "Anima"
 }

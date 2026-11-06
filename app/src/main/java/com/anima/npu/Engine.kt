@@ -100,6 +100,18 @@ object Engine {
     /** [prompt ms, drawing ms, decode ms, block-load wait ms] of the last MOSS picture. */
     external fun mossTimes(): DoubleArray
 
+    // ---- Wan 2.2 TI2V-5B Turbo (models/wan): a 17-frame 768x768 clip from a picture, prompt read by [WanReader] ----
+
+    /** Checks the Wan files; returns an error message or null. */
+    external fun wanInit(modelDir: String, libDir: String): String?
+
+    /** frames * 768 * 768 ARGB pixels, frame after frame, or null (then see [lastError]). [rows]: n x 4096 from
+     *  [WanReader.read]; [rgb]: the start picture, 768 * 768 * 3 bytes. */
+    external fun wanGenerate(rows: FloatArray, rgb: ByteArray, seed: Long, progress: Progress): IntArray?
+
+    /** [prepare ms, drawing ms, decode ms, block-load wait ms] of the last clip. */
+    external fun wanTimes(): DoubleArray
+
     /** Total time spent running graphs on the neural unit so far, in ns (for the usage monitor). */
     external fun npuBusyNs(): Long
 

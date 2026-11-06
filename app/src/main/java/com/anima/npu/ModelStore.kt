@@ -43,6 +43,11 @@ class ModelStore(
             "moss", "MOSS-Image",
             "MOSS-Image and its 8-step add-on are released under the Apache 2.0 licence.",
             "https://huggingface.co/sebekblessing/moss-qnn-8elite/resolve/main/manifest.json", "moss/")
+        val WAN = ModelStore(
+            "wan", "Wan 2.2 clips",
+            "Wan 2.2 (Alibaba), its LightTAE decoder and the umT5 prompt reader are released under the Apache 2.0 " +
+                "licence. The Turbo version's page names no licence.",
+            "https://huggingface.co/sebekblessing/wan22-qnn-8elite/resolve/main/manifest.json", "wan/")
         val LING = ModelStore(
             "ling", "Ling-3.0-tiny (chat)",
             "Ling-3.0-tiny is released by inclusionAI under the MIT licence.",
@@ -51,7 +56,7 @@ class ModelStore(
             "smallchat", "Qwen3.5 0.8B (small chat)",
             "Qwen3.5 0.8B is released by the Qwen team (Alibaba) under the Apache 2.0 licence.",
             "https://huggingface.co/sebekblessing/anima-qnn-8elite/resolve/main/smallchat/manifest.json", "smallchat/")
-        val ALL = listOf(ANIMA, KLEIN, QWEN, FIBO, MOSS, LING, SMALLCHAT)
+        val ALL = listOf(ANIMA, KLEIN, QWEN, FIBO, MOSS, WAN, LING, SMALLCHAT)
         /** The picture models, for the Create screen's picker. */
         val PICTURE = listOf(ANIMA, KLEIN, QWEN, FIBO, MOSS)
         fun byId(id: String) = ALL.first { it.id == id }

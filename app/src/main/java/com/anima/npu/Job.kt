@@ -6,7 +6,7 @@ enum class JobState { WAITING, DRAWING, DONE, FAILED, CANCELLED }
 
 /**
  * One picture to draw. [sourceFile]: the guide picture (Anima) or the picture to edit (Klein/Qwen), saved in the
- * queue folder. [origin]: "create" or "chat:<conversation id>". [model]: "anima", "klein", "qwen", "fibo" (edits only) or "moss" (no edits); [qwenDrawing]: Qwen's drawing files, "qwen" or "noctq".
+ * queue folder. [origin]: "create" or "chat:<conversation id>". [model]: "anima", "klein", "qwen", "fibo" (edits only) "moss" (no edits) "wan" (a clip from the source picture) or "upscale" (the source picture 4x bigger); [qwenDrawing]: Qwen's drawing files, "qwen" or "noctq".
  */
 data class Job(
     val id: String, val created: Long, val model: String, val qwenDrawing: String, val prompt: String,
