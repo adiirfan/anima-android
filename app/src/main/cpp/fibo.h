@@ -13,7 +13,9 @@
 // Files in one folder: fvis.bin (the reader's vision tower), fr0-3.bin (the reader, Qwen3-VL-4B's language half, 704
 // word slots, graph "t704") + fibo_table_q8.raw (its word table), fprep.bin (once per edit: the reader's 15 taps ->
 // the 320 "gist" rows and the five injection blocks' prompt keys/values), fd0-45.bin (the 46 drawing blocks, one per
-// file, loaded in turn every step), fenc.bin / fdec.bin (Flux.2's tiny encoder and decoder at 768), sigmas.txt.
+// file, loaded in turn every step; fd2-45 each hold a step-1 version and a cheaper later-step version that reuses
+// the gist and edit-picture keys/values kept from step 1), fenc.bin / fdec.bin (Flux.2's tiny encoder and decoder at
+// 768), sigmas.txt.
 // All tensors live in shared memory named after the graph tensors, so the pieces pass data without copies; the
 // block streams xg/xi/xr<k> alternate between two buffers each.
 struct FiboResult {
@@ -38,7 +40,7 @@ private:
     bool bindAll(QnnCtx& c, std::string* err, const std::string& prefix = "");
     bool runFile(const std::string& name, std::string* err, const std::string& prefix = "");
     bool pipeline(const std::vector<std::string>& paths, const std::function<bool(QnnCtx&, std::string*)>& run,
-                  double* waitMs, std::string* err);
+                  double* waitMs, std::string* err, const std::function<bool(const std::string&)>& keep = nullptr);
     std::string dir_;
     int ahead_ = 1;   // files loading ahead (FIBO_AHEAD)
     std::map<std::string, Shm> bufs_;

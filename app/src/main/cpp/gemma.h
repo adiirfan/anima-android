@@ -40,7 +40,7 @@ public:
     // groupSpill > 0: share one scratch (spill-fill) area of that many bytes with the other members; the first
     // member passes groupFirst = nullptr, the rest pass the first member's context().
     // keep: when given, only the graphs it accepts are loaded (the others in the file are never deserialised and
-    // reserve no working memory).
+    // reserve no working memory). If it accepts none of them, the whole file is loaded.
     bool load(const std::string& path, std::string* err, uint64_t groupSpill = 0, Qnn_ContextHandle_t groupFirst = nullptr,
               const std::function<bool(const std::string&)>& keep = nullptr);
     Qnn_ContextHandle_t context() const { return ctx_; }

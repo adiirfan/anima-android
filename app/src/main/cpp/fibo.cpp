@@ -111,7 +111,7 @@ bool Fibo::runFile(const std::string& name, std::string* err, const std::string&
 
 // Runs files in order while the next ones load on a helper thread.
 bool Fibo::pipeline(const std::vector<std::string>& paths, const std::function<bool(QnnCtx&, std::string*)>& run,
-                    double* waitMs, std::string* err) {
+                    double* waitMs, std::string* err, const std::function<bool(const std::string&)>& keep) {
     const int n = (int)paths.size();
     std::vector<std::unique_ptr<QnnCtx>> ctxs(n);
     std::vector<std::future<bool>> loads(n);
@@ -119,7 +119,7 @@ bool Fibo::pipeline(const std::vector<std::string>& paths, const std::function<b
     auto start = [&](int k) {
         loads[k] = std::async(std::launch::async, [&, k] {
             ctxs[k].reset(new QnnCtx());
-            if (!ctxs[k]->load(paths[k], &errs[k])) return false;
+            if (!ctxs[k]->load(paths[k], &errs[k], 0, nullptr, keep)) return false;
             std::lock_guard<std::mutex> lk(bufMutex_);
             return bindAll(*ctxs[k], &errs[k]);
         });
@@ -318,7 +318,12 @@ bool Fibo::generate(const std::vector<int32_t>& ids, uint64_t seed, const uint8_
         }
         if (i > 0) memcpy(bufs_["xg0"].p, xg0.data(), xg0.size() * 2);
         auto run = [](QnnCtx& c, std::string* e) { return c.exec(c.graphs()[0], e); };
-        if (!pipeline(ps, run, &r->msSwapLoad, err)) return false;
+        // blocks 2-45 hold two versions: f<k> (the whole block, also keeps the gist and edit-picture keys/values
+        // kgc/vgc/krc/vrc<k>) for step 1, and c<k> (only the picture rows, reusing those) for the later steps,
+        // about a third faster. Only the one needed is loaded; files with one version always run it.
+        const char want = i == 0 ? 'f' : 'c';
+        auto keep = [want](const std::string& g) { return !g.empty() && g[0] == want; };
+        if (!pipeline(ps, run, &r->msSwapLoad, err, keep)) return false;
         LOGI("step %d of %d done", i + 1, STEPS);
         auto* vel = (const _Float16*)bufs_["vel"].p;
         for (size_t k = 0; k < z.size(); k++) z[k] += (float)(sig[i + 1] - sig[i]) * (float)vel[k];

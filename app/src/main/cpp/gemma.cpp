@@ -133,7 +133,9 @@ bool QnnCtx::load(const std::string& path, std::string* err, uint64_t groupSpill
                   const std::function<bool(const std::string&)>& keep) {
     if (!parse(path, err)) return false;
     std::vector<const char*> only;                     // graphs to deserialise (empty: all)
-    if (keep && std::any_of(graphs_.begin(), graphs_.end(), [&](const Graph& g) { return !keep(g.name); })) {
+    // a filter that accepts none of the file's graphs is ignored: the file is loaded whole
+    if (keep && std::any_of(graphs_.begin(), graphs_.end(), [&](const Graph& g) { return !keep(g.name); }) &&
+        std::any_of(graphs_.begin(), graphs_.end(), [&](const Graph& g) { return keep(g.name); })) {
         graphs_.erase(std::remove_if(graphs_.begin(), graphs_.end(), [&](const Graph& g) { return !keep(g.name); }), graphs_.end());
         for (auto& g : graphs_) only.push_back(g.name.c_str());
         only.push_back(nullptr);
