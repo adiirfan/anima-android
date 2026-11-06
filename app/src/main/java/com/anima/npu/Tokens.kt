@@ -152,4 +152,26 @@ object QwenImageTokens {
         for (id in ids) if (edit && id.toInt() == PAD) repeat(PICTURE_ROWS) { out.add(PAD) } else out.add(id.toInt())
         return out.toIntArray()
     }
+
+    /**
+     * Fibo 2.0 edit: no system turn, and the user turn is a compact JSON request (as Python's json.dumps with
+     * ensure_ascii=False and no spaces) holding the picture and the instruction.
+     */
+    fun encodeFibo(text: String): IntArray {
+        val req = "{\"image\":\"<|vision_start|><|image_pad|><|vision_end|>\",\"edit_instruction\":${jsonString(text)}}"
+        val ids = qwen!!.encode("<|im_start|>user\n$req<|im_end|>\n<|im_start|>assistant\n", false, false).ids
+        val out = ArrayList<Int>(ids.size + PICTURE_ROWS)
+        for (id in ids) if (id.toInt() == PAD) repeat(PICTURE_ROWS) { out.add(PAD) } else out.add(id.toInt())
+        return out.toIntArray()
+    }
+
+    private fun jsonString(s: String) = buildString {
+        append('"')
+        for (c in s) when (c) {
+            '"' -> append("\\\""); '\\' -> append("\\\\"); '\n' -> append("\\n"); '\r' -> append("\\r"); '\t' -> append("\\t")
+            '\b' -> append("\\b"); '\u000C' -> append("\\f")
+            else -> if (c < ' ') append("\\u%04x".format(c.code)) else append(c)
+        }
+        append('"')
+    }
 }

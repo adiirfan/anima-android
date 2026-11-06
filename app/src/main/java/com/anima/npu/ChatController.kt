@@ -211,7 +211,7 @@ class ChatController(ctx: Context) {
                 }
                 dst
             }
-            val j = Job(jid, System.currentTimeMillis(), a.model, drawing, a.prompt, Random.nextLong(0, 1_000_000_000),
+            val j = Job(jid, System.currentTimeMillis(), a.model, if (drawing == "noctq") drawing else "qwen", a.prompt, Random.nextLong(0, 1_000_000_000),
                 8, if (a.model == "anima") 1 else 0, shape, 1f, 0.5f, src, "chat:$convId")
             Queue.store.add(j)
             j

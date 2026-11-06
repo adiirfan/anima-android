@@ -230,6 +230,23 @@ bool QwenImage::anchorGroup(std::string* err) {
     return dec_.load(dir_ + "/dec.bin", err, groupSpill_, nullptr) && bindAll(dec_, err);
 }
 
+// The noise levels of the drawing steps, before the final 0: the drawing folder's sigmas.txt when it has one
+// (Qwen-Image-2.1-Turbo: its 8 fixed levels, used as they are), else the 4-step LoRA schedule (raw nodes 1, .75,
+// .5, .25 shifted for a picture of n patches).
+static std::vector<double> schedule(const std::string& drawDir, int n) {
+    std::vector<double> sig;
+    if (FILE* f = fopen((drawDir + "/sigmas.txt").c_str(), "r")) {
+        double v;
+        while (fscanf(f, "%lf", &v) == 1) if (v > 0 && v <= 1) sig.push_back(v);
+        fclose(f);
+    }
+    if (sig.empty()) {
+        double mu = 0.5 + 0.4 * (n - 256) / (8192.0 - 256.0);
+        for (double node : {1.0, 0.75, 0.5, 0.25}) sig.push_back(std::exp(mu) / (std::exp(mu) + (1.0 / node - 1.0)));
+    }
+    return sig;
+}
+
 bool QwenImage::init(const std::string& dir, const std::string& libDir, std::string* err, const std::string& drawDir) {
     if (table_ || stable_) return true;
     dir_ = dir;
@@ -263,7 +280,7 @@ bool QwenImage::init(const std::string& dir, const std::string& libDir, std::str
 
 bool QwenImage::generate(const std::vector<int32_t>& ids, uint64_t seed, int W, int H, QimgResult* r, std::string* err,
                          const uint8_t* editRgb, const std::function<void(int, int)>& progress) {
-    if (progress) progress(0, 4);
+    if (progress) progress(0, (int)schedule(draw_, 256).size());
     const bool edit = editRgb != nullptr;
     const int TR = edit ? TE : T;                // reader rows
     int n = (int)ids.size();
@@ -515,18 +532,16 @@ bool QwenImage::generate(const std::vector<int32_t>& ids, uint64_t seed, int W, 
         auto* kb = (_Float16*)bufs_[kbn].p;
         for (int j = 0; j < T + RN; j++) kb[j] = (j < nc || j >= T) ? (_Float16)0.f : NEG;
     }
-    // noise and the turbo schedule (raw nodes 1, .75, .5, .25 shifted for the picture size, then 0)
+    // noise and the schedule (see schedule()), then 0
     std::vector<float> z((size_t)N * C);
     std::mt19937_64 rng(seed);
     std::normal_distribution<float> nd(0.f, 1.f);
     for (auto& v : z) v = nd(rng);
-    double mu = 0.5 + 0.4 * (N - 256) / (8192.0 - 256.0);
-    const double nodes[4] = {1.0, 0.75, 0.5, 0.25};
-    double sig[5];
-    for (int i = 0; i < 4; i++) sig[i] = std::exp(mu) / (std::exp(mu) + (1.0 / nodes[i] - 1.0));
-    sig[4] = 0;
-    for (int i = 0; i < 4; i++) {
-        if (progress) progress(i + 1, 4);
+    std::vector<double> sig = schedule(draw_, N);
+    const int S = (int)sig.size();
+    sig.push_back(0);
+    for (int i = 0; i < S; i++) {
+        if (progress) progress(i + 1, S);
         auto* lat = (_Float16*)bufs_["lat"].p;
         for (size_t k = 0; k < z.size(); k++) lat[k] = (_Float16)z[k];
         auto* ts = (_Float16*)bufs_["ts"].p;
@@ -558,7 +573,7 @@ bool QwenImage::generate(const std::vector<int32_t>& ids, uint64_t seed, int W, 
                 if (!cg.first->exec(*cg.second, err)) return false;
             }
         }
-        LOGI("step %d of 4 done", i + 1);
+        LOGI("step %d of %d done", i + 1, S);
         if (i == 0) for (const char* n : {"lat", "ts", "pi", "kb", "x1", "mods", "x16", "x17", "x18", "x20", "x24", "x28", "x31", "vel"}) if (bufs_.count(n)) dumpRaw(n, bufs_[n].p, bufs_[n].bytes);
         auto* vel = (const _Float16*)bufs_["vel"].p;
         for (size_t k = 0; k < z.size(); k++) z[k] += (float)(sig[i + 1] - sig[i]) * (float)vel[k];
@@ -582,5 +597,6 @@ bool QwenImage::generate(const std::vector<int32_t>& ids, uint64_t seed, int W, 
             r->argb[p] = 0xFF000000u | (u8((float)rgb[p]) << 16) | (u8((float)rgb[NP + p]) << 8) | u8((float)rgb[2 * NP + p]);
     }
     r->msDecode = nowMs() - t4;
+    LOGI("times ms: vision %.0f reader %.0f load %.0f prefix %.0f steps %.0f (waiting for loads %.0f) decode %.0f", r->msVision, r->msReader, r->msLoad, r->msPrefix, r->msSteps, r->msSwapLoad, r->msDecode);
     return true;
 }

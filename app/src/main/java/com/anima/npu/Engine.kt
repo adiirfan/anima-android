@@ -78,6 +78,28 @@ object Engine {
     /** [picture ms (edits), prompt ms, drawing ms, decode ms] of the last Qwen-Image picture. */
     external fun qwenTimes(): DoubleArray
 
+    // ---- Fibo 2.0 edit-turbo (models/qwen/fibo): changes a 768x768 picture following an instruction ----
+
+    /** Opens the Fibo files (word table); returns an error message or null. */
+    external fun fiboInit(modelDir: String, libDir: String): String?
+
+    /** 768*768 ARGB pixels, or null (then see [lastError]). [ids] from [QwenImageTokens.encodeFibo]. */
+    external fun fiboGenerate(ids: IntArray, seed: Long, edit: IntArray, progress: Progress): IntArray?
+
+    /** [picture ms, reader ms, drawing ms, decode ms] of the last Fibo edit. */
+    external fun fiboTimes(): DoubleArray
+
+    // ---- MOSS-Image SFT (models/qwen/moss): draws 768x768 from a prompt read by [MossReader] ----
+
+    /** Checks the MOSS files; returns an error message or null. */
+    external fun mossInit(modelDir: String, libDir: String): String?
+
+    /** 768*768 ARGB pixels, or null (then see [lastError]). [cond] / [unc]: rows of 4096 from [MossReader.read]. */
+    external fun mossGenerate(cond: FloatArray, unc: FloatArray, seed: Long, progress: Progress): IntArray?
+
+    /** [prompt ms, drawing ms, decode ms, block-load wait ms] of the last MOSS picture. */
+    external fun mossTimes(): DoubleArray
+
     /** Total time spent running graphs on the neural unit so far, in ns (for the usage monitor). */
     external fun npuBusyNs(): Long
 

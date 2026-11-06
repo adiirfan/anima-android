@@ -16,14 +16,24 @@ object Drawer {
         val err = when (j.model) {
             "klein" -> Engines.ensureKlein()
             "qwen" -> Engines.ensureQwen(j.qwenDrawing)
+            "fibo" -> Engines.ensureFibo()
+            "moss" -> Engines.ensureMoss()
             else -> Engines.ensureAnima()
         }
         if (err != null) error("Could not start: $err")
-        val (w, h) = if (j.model == "qwen") 768 to 768 else pictureSize(if (j.model == "klein") 0 else j.tier, j.shape)
+        val (w, h) = if (j.model in BIG_MODELS) 768 to 768 else pictureSize(if (j.model == "klein") 0 else j.tier, j.shape)
         val src = j.sourceFile?.let { BitmapFactory.decodeFile(File(Queue.dir(ctx), it).absolutePath) }
         val p = Progress { i, n -> progress(i, n) }
         val t0 = System.currentTimeMillis()
         val px = when (j.model) {
+            "moss" -> {
+                val (cond, unc) = MossReader.read(ctx, ModelStore.MOSS.modelDir(ctx), j.prompt)
+                Engine.mossGenerate(cond, unc, j.seed, p)
+            }
+            "fibo" -> {
+                val e = src?.let { guidePixels(it, w, h) } ?: error("Fibo only edits pictures: choose a picture to edit")
+                Engine.fiboGenerate(QwenImageTokens.encodeFibo(j.prompt), j.seed, e, p)
+            }
             "qwen" -> {
                 val e = if (ModelStore.QWEN.installed(ctx) == "small") null else src?.let { guidePixels(it, w, h) }
                 Engine.qwenGenerate(QwenImageTokens.encode(j.prompt, e != null), j.seed, w, h, e, p)
@@ -37,7 +47,7 @@ object Drawer {
         } ?: error(Engine.lastError())
         val ms = System.currentTimeMillis() - t0
         val bmp = Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888)
-        val entry = Gallery.save(ctx, bmp, j.prompt, j.seed, if (j.model == "anima") j.steps else 4, ms)
+        val entry = Gallery.save(ctx, bmp, j.prompt, j.seed, when (j.model) { "anima" -> j.steps; "qwen", "moss" -> 8; else -> 4 }, ms)
         Result(bmp, entry, ms)
     }
 }

@@ -33,6 +33,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.collectAsState
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -87,9 +89,11 @@ class CreateState {
     var animaPrompt by mutableStateOf("masterpiece, best quality, safe, 1girl, solo, long hair, smile, cherry blossoms, outdoors")
     var kleinPrompt by mutableStateOf("a cozy coffee shop interior with plants, warm light, people chatting, film photography")
     var qwenPrompt by mutableStateOf("A digital painting of a knight in silver armor holding a glowing sword in a dark forest, dramatic lighting.")
+    var fiboPrompt by mutableStateOf("Make the sky stormy and dark")
+    var mossPrompt by mutableStateOf("A lighthouse on a rocky cliff at sunset, waves crashing below, warm golden light.")
     var prompt: String
-        get() = when (model) { "klein" -> kleinPrompt; "qwen" -> qwenPrompt; else -> animaPrompt }
-        set(v) { when (model) { "klein" -> kleinPrompt = v; "qwen" -> qwenPrompt = v; else -> animaPrompt = v } }
+        get() = when (model) { "klein" -> kleinPrompt; "qwen" -> qwenPrompt; "fibo" -> fiboPrompt; "moss" -> mossPrompt; else -> animaPrompt }
+        set(v) { when (model) { "klein" -> kleinPrompt = v; "qwen" -> qwenPrompt = v; "fibo" -> fiboPrompt = v; "moss" -> mossPrompt = v; else -> animaPrompt = v } }
     var edit by mutableStateOf<Bitmap?>(null)  // Klein / Qwen: the picture to change (cropped per size); null = new picture
     var seed by mutableStateOf(Random.nextLong(0, 1_000_000_000))
     var seedLocked by mutableStateOf(false)  // the user typed a seed: keep it for the next jobs too
@@ -114,9 +118,14 @@ class CreateState {
 // Times are 8 steps on the iQOO 13 (8 Elite).
 val SIZE_TIERS = listOf("512" to "about 6 s", "768" to "about 17 s")
 const val KLEIN_TIME = "4 steps · about 6 s, edits about 13 s"
-const val QWEN_TIME = "4 steps · about 1 min 20 s, edits about 3 min"
+const val QWEN_TIME = "8 steps · about 3 min 20 s, edits about 5 min"   // Qwen-Image-2.1-Turbo, iQOO 13 2026-11-06
+const val NOCTQ_TIME = "4 steps · about 1 min 20 s, edits about 3 min"
 /** Folder (inside Qwen's) holding Noct Q V4's drawing files, copied over the cable: no download for it. */
 const val NOCTQ_DIR = "noctq"
+const val FIBO_TIME = "edits only · 4 steps · about 1 min 30 s"   // Fibo 2.0 edit-turbo, iQOO 13 2026-11-06
+const val MOSS_TIME = "8 steps · about 1 min 30 s"   // MOSS-Image SFT + 8-step DMD add-on, iQOO 13 2026-11-06
+/** The models that draw one 768x768 size only, with no size or memory choices. */
+val BIG_MODELS = setOf("qwen", "fibo", "moss")
 val SHAPES = listOf("Square", "Tall 9:16", "Wide 16:9")
 private val SIZES = listOf(
     listOf(512 to 512, 384 to 672, 672 to 384),
@@ -206,7 +215,7 @@ class MainActivity : ComponentActivity() {
                         it.tier = prefs.getInt("tier", 0).coerceIn(0, SIZE_TIERS.size - 1)
                         it.shape = prefs.getInt("shape", 0).coerceIn(0, SHAPES.size - 1)
                         it.model = prefs.getString("model", "anima") ?: "anima"
-                        it.qwenDrawing = prefs.getString("qwenDrawing", "qwen") ?: "qwen"
+                        it.qwenDrawing = prefs.getString("qwenDrawing", "qwen").takeIf { d -> d == "noctq" } ?: "qwen"
                     }
                 }
                 var tab by remember { mutableIntStateOf(0) }
@@ -297,23 +306,18 @@ class MainActivity : ComponentActivity() {
                                 val st = ModelStore.byId(create.model)
                                 val inst = installedOf[st.id]
                                 Create(create, Engines::ensureAnima, Engines::ensureKlein, { Engines.ensureQwen(create.qwenDrawing) },
-                                    modelLabel = st.title + (st.cachedManifest(ctx)?.variants?.firstOrNull { it.id == inst }?.label?.let { " · $it" } ?: ""),
+                                    modelLabel = st.title + (st.cachedManifest(ctx)?.variants?.firstOrNull { it.id == inst }?.label?.takeIf { it != st.title }?.let { " · $it" } ?: ""),
                                     installed = inst != null, animaInstalled = installed != null,
                                     onChangeModel = { downloadFor = st.id }, onDownload = { downloadFor = st.id },
                                     updateBytes = updateBytesOf[st.id] ?: 0L, onUpdate = { updating = true; downloadFor = st.id },
-                                    onModel = { id ->
+                                    onModel = { id, drawing ->
                                         if (id != create.model) Engine.release()  // the other model's pieces leave the neural unit
                                         create.model = id
-                                        prefs.edit().putString("model", id).apply()
+                                        if (drawing != null) create.qwenDrawing = drawing
+                                        prefs.edit().putString("model", id).putString("qwenDrawing", create.qwenDrawing).apply()
                                     },
                                     onSize = { prefs.edit().putInt("tier", create.tier).putInt("shape", create.shape).apply() },
-                                    onQueue = { showQueue = true },
-                                    onQwenDrawing = { id ->
-                                        if (id != create.qwenDrawing) {
-                                            create.qwenDrawing = id
-                                            prefs.edit().putString("qwenDrawing", id).apply()
-                                        }
-                                    }) { m ->
+                                    onQueue = { showQueue = true }) { m ->
                                     create.memoryMode = m
                                     prefs.edit().putInt("memoryMode", m).apply()
                                     Engines.setMemoryMode(m)
@@ -362,14 +366,17 @@ fun Create(
     s: CreateState, ensureEngine: suspend () -> String?, ensureKlein: suspend () -> String?, ensureQwen: suspend () -> String?,
     modelLabel: String,
     installed: Boolean, animaInstalled: Boolean, onChangeModel: () -> Unit, onDownload: () -> Unit,
-    updateBytes: Long, onUpdate: () -> Unit, onModel: (String) -> Unit, onSize: () -> Unit,
-    onQwenDrawing: (String) -> Unit, onQueue: () -> Unit, onMemoryMode: (Int) -> Unit,
+    updateBytes: Long, onUpdate: () -> Unit, onModel: (String, String?) -> Unit, onSize: () -> Unit,
+    onQueue: () -> Unit, onMemoryMode: (Int) -> Unit,
 ) {
     val ctx = LocalContext.current
     val scope = s.work  // outlives this screen: a tab switch must not drop a picture being drawn
     val klein = s.model == "klein"
     val qwen = s.model == "qwen"
-    val anima = !klein && !qwen
+    val fibo = s.model == "fibo"
+    val moss = s.model == "moss"
+    val big = s.model in BIG_MODELS   // one 768x768 size, no size or memory choices
+    val anima = s.model == "anima"
     // the Small Qwen download reads prompts with the 2B and cannot edit pictures
     val qwenSmall = qwen && remember(installed) { ModelStore.QWEN.installed(ctx) == "small" }
     val read = { uri: Uri -> runCatching { ctx.contentResolver.openInputStream(uri)!!.use { BitmapFactory.decodeStream(it) } }.getOrNull() }
@@ -386,11 +393,27 @@ fun Create(
         }
     }
     Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SingleChoiceSegmentedButtonRow {
-            ModelStore.PICTURE.forEachIndexed { i, st ->
-                SegmentedButton(selected = s.model == st.id, onClick = { onModel(st.id) }, enabled = !s.busy,
-                    shape = SegmentedButtonDefaults.itemShape(i, ModelStore.PICTURE.size)) {
-                    Text(when (st.id) { "klein" -> "Klein"; "qwen" -> "Qwen"; else -> st.title })
+        // One list of drawing models (2026-11-06: five models and Noct Q no longer fit as buttons in a row).
+        // Noct Q is Qwen with other drawing files, copied over the cable into qwen/noctq/: listed when present.
+        val choices = remember(installed) {
+            listOfNotNull(
+                Triple("anima", null, "Anima"), Triple("klein", null, "FLUX.2 klein"), Triple("qwen", "qwen", "Qwen-Image 2.1"),
+                Triple("qwen", "noctq", "Noct Q").takeIf { File(ModelStore.QWEN.modelDir(ctx), "$NOCTQ_DIR/sp31.bin").isFile },
+                Triple("fibo", null, "Fibo 2.0 (edits)"), Triple("moss", null, "MOSS-Image"),
+            )
+        }
+        var menu by remember { mutableStateOf(false) }
+        Box {
+            OutlinedButton(onClick = { menu = true }, enabled = !s.busy, modifier = Modifier.fillMaxWidth()) {
+                Text(choices.firstOrNull { it.first == s.model && (it.second == null || it.second == s.qwenDrawing) }?.third ?: s.model,
+                    Modifier.weight(1f))
+                Text("▾")
+            }
+            DropdownMenu(menu, { menu = false }) {
+                choices.forEach { (id, drawing, name) ->
+                    val have = ModelStore.byId(id).installed(ctx) != null
+                    DropdownMenuItem(text = { Text(if (have) name else "$name · not downloaded") },
+                        onClick = { menu = false; onModel(id, drawing) })
                 }
             }
         }
@@ -398,6 +421,8 @@ fun Create(
             Text("${ModelStore.byId(s.model).title} is not downloaded yet." + when {
                 klein -> " It draws from plain sentences and can edit your pictures (about 4 GB)."
                 qwen -> " It draws 768×768 pictures from plain sentences and can edit your pictures (about 15 GB)."
+                fibo -> " It changes your pictures as you describe, at 768×768 (about 15 GB). It only edits."
+                moss -> " It draws 768×768 pictures from plain sentences in 8 steps (about 16 GB). It does not edit."
                 else -> ""
             })
             Button(onClick = onDownload, enabled = !Installer.running) { Text("Download…") }
@@ -405,7 +430,7 @@ fun Create(
             return@Column
         }
         OutlinedTextField(s.prompt, { s.prompt = it }, Modifier.fillMaxWidth(),
-            label = { Text(if (!anima && !qwenSmall && s.edit != null) "What to change" else "Prompt") }, minLines = 3, enabled = !s.busy)
+            label = { Text(if (fibo || !anima && !moss && !qwenSmall && s.edit != null) "What to change" else "Prompt") }, minLines = 3, enabled = !s.busy)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 s.seed.toString(), { v -> v.toLongOrNull()?.let { s.seed = it; s.seedLocked = true } }, Modifier.width(170.dp),
@@ -423,44 +448,36 @@ fun Create(
                 }
             }
         }
-        if (!qwen) Text("Size")
+        if (!big) Text("Size")
         if (anima) SingleChoiceSegmentedButtonRow {
             SIZE_TIERS.forEachIndexed { i, (name, _) ->
                 SegmentedButton(selected = s.tier == i, onClick = { s.tier = i; onSize() }, enabled = !s.busy,
                     shape = SegmentedButtonDefaults.itemShape(i, SIZE_TIERS.size)) { Text(name) }
             }
         }
-        if (!qwen) SingleChoiceSegmentedButtonRow {
+        if (!big) SingleChoiceSegmentedButtonRow {
             SHAPES.forEachIndexed { i, name ->
                 SegmentedButton(selected = s.shape == i, onClick = { s.shape = i; onSize() }, enabled = !s.busy,
                     shape = SegmentedButtonDefaults.itemShape(i, SHAPES.size)) { Text(name, maxLines = 1) }
             }
         }
-        val (pw, ph) = if (qwen) 768 to 768 else pictureSize(if (klein) 0 else s.tier, s.shape)
-        Text("$pw×$ph · " + when { klein -> KLEIN_TIME; qwen -> QWEN_TIME; else -> SIZE_TIERS[s.tier].second },
+        val (pw, ph) = if (big) 768 to 768 else pictureSize(if (klein) 0 else s.tier, s.shape)
+        Text("$pw×$ph · " + when { klein -> KLEIN_TIME; fibo -> FIBO_TIME; moss -> MOSS_TIME
+            qwen -> if (s.qwenDrawing == "noctq") NOCTQ_TIME else QWEN_TIME; else -> SIZE_TIERS[s.tier].second },
             style = MaterialTheme.typography.bodySmall)
         if (qwenSmall) Text("Editing pictures needs the Standard Qwen download (Model: Change).", style = MaterialTheme.typography.bodySmall)
-        // Noct Q: a fine-tune of Qwen-Image 2.1 (uncensored), copied to the phone into qwen/noctq/ - only its drawing
-        // files, the readers and decoder are Qwen's
-        val noctq = qwen && remember(installed) { File(ModelStore.QWEN.modelDir(ctx), "$NOCTQ_DIR/sp31.bin").isFile }
-        if (noctq) {
-            Text("Drawing model", style = MaterialTheme.typography.bodySmall)
-            SingleChoiceSegmentedButtonRow {
-                listOf("qwen" to "Qwen-Image", "noctq" to "Noct Q").forEachIndexed { i, (id, name) ->
-                    SegmentedButton(selected = s.qwenDrawing == id, onClick = { onQwenDrawing(id) }, enabled = !s.busy,
-                        shape = SegmentedButtonDefaults.itemShape(i, 2)) { Text(name, maxLines = 1) }
-                }
-            }
-        }
-        if (!anima && !qwenSmall) {
-            Text("Picture to edit (optional): ${if (klein) "Klein" else "Qwen"} changes it as you describe")
+        val fiboNeedsPicture = fibo && s.edit == null
+        if (fiboNeedsPicture) Text("Fibo only edits: choose a picture to edit below.", style = MaterialTheme.typography.bodySmall)
+        if (!anima && !qwenSmall && !moss) {   // MOSS only draws new pictures
+            Text(if (fibo) "Picture to edit: Fibo changes it as you describe"
+                else "Picture to edit (optional): ${if (klein) "Klein" else "Qwen"} changes it as you describe")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 s.edit?.let { Image(it.asImageBitmap(), null, Modifier.size(72.dp), contentScale = ContentScale.Crop) }
                 OutlinedButton(onClick = { pickEdit.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                     enabled = !s.busy) { Text(if (s.edit == null) "Choose…" else "Change") }
                 if (s.edit != null) TextButton(onClick = { s.edit = null }, enabled = !s.busy) { Text("Remove") }
             }
-            if (s.edit != null) Text((if (qwen) "It is cropped to a square." else "It is cropped to the shape above.") +
+            if (s.edit != null) Text((if (big) "It is cropped to a square." else "It is cropped to the shape above.") +
                 " Describe the change, e.g. \"make her hair red\".", style = MaterialTheme.typography.bodySmall)
         }
         if (anima) Text("Guide picture (optional): the layout and pose follow it, the prompt decides the rest")
@@ -478,14 +495,14 @@ fun Create(
             Text("Less of the drawing keeps the pose but lets the prompt change clothes and details.",
                 style = MaterialTheme.typography.bodySmall)
         }
-        if (!qwen) Text("Memory use")
-        if (!qwen) SingleChoiceSegmentedButtonRow {
+        if (!big) Text("Memory use")
+        if (!big) SingleChoiceSegmentedButtonRow {
             MEMORY_MODES.forEachIndexed { i, (name, _) ->
                 SegmentedButton(selected = s.memoryMode == i, onClick = { onMemoryMode(i) }, enabled = !s.busy,
                     shape = SegmentedButtonDefaults.itemShape(i, MEMORY_MODES.size)) { Text(name) }
             }
         }
-        if (!qwen) Text(MEMORY_MODES[s.memoryMode].second, style = MaterialTheme.typography.bodySmall)
+        if (!big) Text(MEMORY_MODES[s.memoryMode].second, style = MaterialTheme.typography.bodySmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Model: $modelLabel", style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = onChangeModel, enabled = !s.busy) { Text("Change") }
@@ -501,7 +518,7 @@ fun Create(
             enqueueFromCreate(ctx, s)
             if (!s.seedLocked) s.seed = Random.nextLong(0, 1_000_000_000)   // the next job draws a new picture
             s.status = "Added to the queue"
-        }, enabled = !Installer.running && s.prompt.isNotBlank() && installed, modifier = Modifier.fillMaxWidth()) {
+        }, enabled = !Installer.running && s.prompt.isNotBlank() && installed && !fiboNeedsPicture, modifier = Modifier.fillMaxWidth()) {
             Text(if (Installer.running) "Add to queue (after the update)" else "Add to queue")
         }
         // the newest finished picture from this screen, and how the queue is doing

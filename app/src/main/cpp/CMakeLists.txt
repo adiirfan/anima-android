@@ -11,7 +11,7 @@ if(NOT QNN_SDK)
   endif()
 endif()
 
-add_library(anima SHARED jni_bridge.cpp qnn_runner.cpp pipeline.cpp klein.cpp gemma.cpp qimg.cpp)
+add_library(anima SHARED jni_bridge.cpp qnn_runner.cpp pipeline.cpp klein.cpp gemma.cpp qimg.cpp fibo.cpp moss.cpp)
 target_include_directories(anima PRIVATE ${QNN_SDK}/include/QNN ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(anima PRIVATE -O3 -Wno-unused-parameter)
 target_link_libraries(anima android log dl)

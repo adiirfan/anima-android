@@ -18,6 +18,8 @@ object Engines {
     private var anima = false
     private var klein = false
     private var qwen: String? = null   // the Qwen drawing model it was started with ("qwen" or "noctq")
+    private var fibo = false
+    private var moss = false
     var memoryMode = 1
         private set
     private var memOverride = -1
@@ -73,6 +75,28 @@ object Engines {
         }
     }
 
+    /** Fibo 2.0 edit, from its own folder (it reads prompts with Qwen's word list, a copy of which is in that folder). */
+    suspend fun ensureFibo(): String? = lock.withLock {
+        withContext(Dispatchers.Default) {
+            if (fibo) return@withContext null
+            val dir = ModelStore.FIBO.modelDir(app)
+            Engine.fiboInit(dir.absolutePath, libDir)?.let { return@withContext it }
+            QwenImageTokens.init(dir)
+            fibo = true
+            null
+        }
+    }
+
+    /** MOSS-Image, from its own folder (its reader is llama.cpp, started per picture by [MossReader]). */
+    suspend fun ensureMoss(): String? = lock.withLock {
+        withContext(Dispatchers.Default) {
+            if (moss) return@withContext null
+            Engine.mossInit(ModelStore.MOSS.modelDir(app).absolutePath, libDir)?.let { return@withContext it }
+            moss = true
+            null
+        }
+    }
+
     fun setMemoryMode(m: Int) {
         memoryMode = m
         if (anima) Engine.setMemoryMode(m)
@@ -81,7 +105,7 @@ object Engines {
 
     /** After a model download: the engine reads its files afresh next time. */
     fun invalidate(model: String) {
-        when (model) { "klein" -> klein = false; "qwen" -> qwen = null; else -> anima = false }
+        when (model) { "klein" -> klein = false; "qwen" -> qwen = null; "fibo" -> fibo = false; "moss" -> moss = false; else -> anima = false }
     }
 
     fun release() = Engine.release()
