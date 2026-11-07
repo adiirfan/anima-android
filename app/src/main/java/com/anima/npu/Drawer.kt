@@ -42,7 +42,7 @@ object Drawer {
             val all = Engine.wanGenerate(rows, rgb, j.seed, p) ?: error(Engine.lastError())
             val ms = System.currentTimeMillis() - t0
             val frames = List(all.size / (w * h)) { f -> all.copyOfRange(f * w * h, (f + 1) * w * h) }
-            val entry = Gallery.saveGif(ctx, frames, w, h, j.prompt, j.seed, 8, ms)
+            val entry = Gallery.saveVideo(ctx, frames, w, h, j.prompt, j.seed, 8, ms)
             return@withContext Result(Bitmap.createBitmap(frames[0], w, h, Bitmap.Config.ARGB_8888), entry, ms)
         }
         val px = when (j.model) {

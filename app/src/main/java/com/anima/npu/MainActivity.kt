@@ -61,6 +61,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -112,13 +113,22 @@ class CreateState {
     var guideStrength by mutableStateOf(1f)
     var guideEnd by mutableStateOf(0.5f)
     var genW by mutableIntStateOf(512)  // size of the last generated picture (the upscale input)
-    var clipUri by mutableStateOf<Uri?>(null)  // the shown result is a Wan clip (a GIF): played instead of [picture]
+    var clipUri by mutableStateOf<Uri?>(null)  // the shown result is a Wan clip (an MP4): played instead of [picture]
 }
 
-/** Plays an animated GIF from the gallery, looping. */
+/** Plays a clip from the gallery, looping, without sound: MP4 in a video view, an older GIF as an animated picture. */
 @Composable
 fun GifPlayer(uri: Uri, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
+    val video = remember(uri) { runCatching { ctx.contentResolver.getType(uri) }.getOrNull()?.startsWith("video/") == true }
+    if (video) {
+        androidx.compose.ui.viewinterop.AndroidView(
+            factory = { c -> android.widget.VideoView(c).apply {
+                setOnPreparedListener { mp -> mp.isLooping = true; mp.setVolume(0f, 0f); start() }
+                setVideoURI(uri)
+            } }, modifier = modifier)
+        return
+    }
     var d by remember(uri) { mutableStateOf<android.graphics.drawable.Drawable?>(null) }
     LaunchedEffect(uri) {
         d = withContext(Dispatchers.IO) {
@@ -146,7 +156,7 @@ const val FIBO_TIME = "edits only · 4 steps · about 1 min 30 s"   // Fibo 2.0 
 const val MOSS_TIME = "8 steps · about 1 min 30 s"   // MOSS-Image SFT + 8-step DMD add-on, iQOO 13 2026-11-06
 /** The models that draw one 768x768 size only, with no size or memory choices. */
 val BIG_MODELS = setOf("qwen", "fibo", "moss", "wan")
-const val WAN_TIME = "17 frames, a looping GIF · about 2 min on the iQOO 13"
+const val WAN_TIME = "17 frames, a looping video · about 2.5 min on the iQOO 13"
 val SHAPES = listOf("Square", "Tall 9:16", "Wide 16:9")
 private val SIZES = listOf(
     listOf(512 to 512, 384 to 672, 672 to 384),
@@ -446,7 +456,7 @@ fun Create(
                 qwen -> " It draws 768×768 pictures from plain sentences and can edit your pictures (about 15 GB)."
                 fibo -> " It changes your pictures as you describe, at 768×768 (about 15 GB). It only edits."
                 moss -> " It draws 768×768 pictures from plain sentences in 8 steps (about 16 GB). It does not edit."
-                wan -> " It turns one of your pictures into a short looping GIF that moves as you describe."
+                wan -> " It turns one of your pictures into a short looping video that moves as you describe."
                 else -> ""
             })
             Button(onClick = onDownload, enabled = !Installer.running) { Text("Download…") }
@@ -560,7 +570,7 @@ fun Create(
                 ?: return@LaunchedEffect
             if (j.id == s.shownJob) return@LaunchedEffect
             val e = Gallery.Entry(android.net.Uri.parse(j.resultUri), j.prompt, j.seed, j.steps, j.ms, j.width, 0, j.height)
-            val bmp = withContext(Dispatchers.IO) { Gallery.full(ctx, e) } ?: return@LaunchedEffect
+            val bmp = withContext(Dispatchers.IO) { Gallery.full(ctx, e, Int.MAX_VALUE) } ?: return@LaunchedEffect
             s.shownJob = j.id
             s.picture = bmp; s.savedFor = bmp; s.genW = bmp.width; s.pictureMs = j.ms
             s.clipUri = if (j.model == "wan") e.uri else null
@@ -603,10 +613,10 @@ fun Create(
 @Composable
 fun GalleryGrid(onOpen: (Gallery.Entry) -> Unit) {
     val ctx = LocalContext.current
-    var items by remember { mutableStateOf<List<Pair<Gallery.Entry, Bitmap?>>>(emptyList()) }
+    var items by remember { mutableStateOf<List<Gallery.Entry>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        items = withContext(Dispatchers.IO) { Gallery.list(ctx).map { it to Gallery.thumbnail(ctx, it, 384) } }
+        items = withContext(Dispatchers.IO) { Gallery.list(ctx) }
         loaded = true
     }
     if (loaded && items.isEmpty()) {
@@ -614,7 +624,11 @@ fun GalleryGrid(onOpen: (Gallery.Entry) -> Unit) {
         return
     }
     LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize().padding(4.dp)) {
-        items(items, key = { it.first.uri.toString() }) { (e, thumb) ->
+        items(items, key = { it.uri.toString() }) { e ->
+            // each preview is made when its square comes into view, and kept for next time
+            val thumb by produceState(Gallery.cachedThumbnail(e, 384), e.uri) {
+                if (value == null) value = withContext(Dispatchers.IO) { Gallery.thumbnail(ctx, e, 384) }
+            }
             Box(Modifier.padding(2.dp).aspectRatio(1f).clickable { onOpen(e) }) {
                 thumb?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
             }
@@ -632,7 +646,7 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
     var gif by remember(e0) { mutableStateOf(false) }
     var note by remember(e0) { mutableStateOf("") }
     var upscaling by remember(e0) { mutableStateOf(false) }
-    LaunchedEffect(e) { bmp = withContext(Dispatchers.IO) { gif = Gallery.isGif(ctx, e); Gallery.full(ctx, e) } }
+    LaunchedEffect(e) { bmp = withContext(Dispatchers.IO) { gif = Gallery.isClip(ctx, e); Gallery.full(ctx, e) } }
     Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         TextButton(onClick = onBack) { Text("‹ Back") }
         bmp?.let {
@@ -640,11 +654,11 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
             else Image(it.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(it.width.toFloat() / it.height))
         }
         Text(e.prompt)
-        Text("seed ${e.seed} · ${e.steps} steps · ${bmp?.width ?: e.width}×${bmp?.height ?: e.height}", style = MaterialTheme.typography.bodySmall)
+        Text("seed ${e.seed} · ${e.steps} steps · ${e.width}×${e.height}", style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { onUse(e) }) { Text("Use this prompt") }
             OutlinedButton(onClick = {
-                val send = Intent(Intent.ACTION_SEND).setType(if (gif) "image/gif" else "image/png").putExtra(Intent.EXTRA_STREAM, e.uri)
+                val send = Intent(Intent.ACTION_SEND).setType(Gallery.mime(ctx, e)).putExtra(Intent.EXTRA_STREAM, e.uri)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 ctx.startActivity(Intent.createChooser(send, "Share picture"))
             }) { Text("Share") }

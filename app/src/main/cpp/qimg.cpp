@@ -537,6 +537,10 @@ bool QwenImage::generate(const std::vector<int32_t>& ids, uint64_t seed, int W, 
     std::mt19937_64 rng(seed);
     std::normal_distribution<float> nd(0.f, 1.f);
     for (auto& v : z) v = nd(rng);
+    // Debugging: QIMG_NOISE=<file> starts from that noise instead (N x 64 floats, picture rows), e.g. ComfyUI's own
+    // for the same seed, so the phone's picture can be compared with ComfyUI's directly.
+    if (const char* nf = getenv("QIMG_NOISE"))
+        if (FILE* f = fopen(nf, "rb")) { size_t got = fread(z.data(), 4, z.size(), f); fclose(f); LOGI("noise from %s (%zu values)", nf, got); }
     std::vector<double> sig = schedule(draw_, N);
     const int S = (int)sig.size();
     sig.push_back(0);

@@ -90,6 +90,13 @@ bool channelsLast(const QnnCtx::Graph& g, bool input, const std::string& name, u
 static const float kLatMean[48] = {-0.2289f, -0.0052f, -0.1323f, -0.2339f, -0.2799f, 0.0174f, 0.1838f, 0.1557f, -0.1382f, 0.0542f, 0.2813f, 0.0891f, 0.1570f, -0.0098f, 0.0375f, -0.1825f, -0.2246f, -0.1207f, -0.0698f, 0.5109f, 0.2665f, -0.2108f, -0.2158f, 0.2502f, -0.2055f, -0.0322f, 0.1109f, 0.1567f, -0.0729f, 0.0899f, -0.2799f, -0.1230f, -0.0313f, -0.1649f, 0.0117f, 0.0723f, -0.2839f, -0.2083f, -0.0520f, 0.3748f, 0.0152f, 0.1957f, 0.1433f, -0.2944f, 0.3573f, -0.0548f, -0.1681f, -0.0667f};
 static const float kLatStd[48] = {0.4765f, 1.0364f, 0.4514f, 1.1677f, 0.5313f, 0.4990f, 0.4818f, 0.5013f, 0.8158f, 1.0344f, 0.5894f, 1.0901f, 0.6885f, 0.6165f, 0.8454f, 0.4978f, 0.5759f, 0.3523f, 0.7135f, 0.6804f, 0.5833f, 1.4146f, 0.8986f, 0.5659f, 0.7069f, 0.5338f, 0.4889f, 0.4917f, 0.4069f, 0.4999f, 0.6866f, 0.4093f, 0.5709f, 0.6065f, 0.6415f, 0.4944f, 0.5726f, 1.2042f, 0.5458f, 1.6887f, 0.3971f, 1.0600f, 0.3943f, 0.5537f, 0.5444f, 0.4089f, 0.7468f, 0.7744f};
 
+// Debugging: when the model folder holds a "dump" folder, the start latents, the prompt rows, the first step's
+// velocity and the final latents are written there as raw files (compared with sim_clip.py on the computer).
+static void wanDump(const std::string& dir, const char* name, const void* p, size_t bytes) {
+    if (access((dir + "/dump").c_str(), F_OK) != 0) return;
+    if (FILE* f = fopen((dir + "/dump/" + name).c_str(), "wb")) { fwrite(p, 1, bytes, f); fclose(f); }
+}
+
 Wan::~Wan() { release(); }
 
 void Wan::release() {
@@ -206,6 +213,8 @@ bool Wan::generate(const float* rows, int n, const uint8_t* rgb, uint64_t seed, 
     for (int ch = 0; ch < C; ch++)
         for (int f = 0; f < F; f++)
             for (size_t p = 0; p < PLANE; p++) z[zat(ch, f) + p] = f == 0 ? z0[ch * PLANE + p] : nd(rng);
+    wanDump(dir_, "zinit.f32", z.data(), z.size() * 4);
+    wanDump(dir_, "rows.f32", rows, (size_t)n * TXT * 4);
     std::vector<std::string> paths;
     for (int k = 0; k < NB; k++) paths.push_back(dir_ + "/w" + std::to_string(k) + ".bin");
     for (int i = 0; i < STEPS; i++) {
@@ -278,6 +287,7 @@ bool Wan::generate(const float* rows, int n, const uint8_t* rgb, uint64_t seed, 
         // velocity rows (dy, dx, channel) -> one flow step; the start frame stays the clean picture
         auto* v = (const _Float16*)bufs_["vel"].p;
         const float dt = (float)(sig[i + 1] - sig[i]);
+        if (i == 0) wanDump(dir_, "vel0.f16", v, bufs_["vel"].bytes);
         for (int f = 1; f < F; f++)
             for (int py = 0; py < PH; py++)
                 for (int px = 0; px < PH; px++) {
@@ -290,6 +300,7 @@ bool Wan::generate(const float* rows, int n, const uint8_t* rgb, uint64_t seed, 
         LOGI("step %d of %d done", i + 1, STEPS);
     }
     r->msSteps = nowMs() - t0;
+    wanDump(dir_, "zfinal.f32", z.data(), z.size() * 4);
     for (const char* k : {"m0", "m1", "m2", "m3", "m4", "m5", "er", "patches", "pw", "qw"}) {   // drawing's buffers
         auto it = bufs_.find(k);
         if (it != bufs_.end()) { g_rpc.free(it->second.p); bufs_.erase(it); }

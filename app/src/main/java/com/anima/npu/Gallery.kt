@@ -79,6 +79,30 @@ object Gallery {
         return e
     }
 
+    /** A clip as an MP4 video in Pictures/Anima ([VideoWriter]); [frames]: w*h ARGB each. The entry's size is a frame's. */
+    fun saveVideo(ctx: Context, frames: List<IntArray>, w: Int, h: Int, prompt: String, seed: Long, steps: Int, ms: Long): Entry {
+        val now = System.currentTimeMillis()
+        val values = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, "anima_${now}_$seed.mp4")
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Anima")
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+        }
+        val r = ctx.contentResolver
+        val uri = r.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: error("could not create the clip file")
+        try {
+            r.openFileDescriptor(uri, "rw")!!.use { VideoWriter.write(it.fileDescriptor, frames, w, h) }
+        } catch (t: Throwable) {
+            runCatching { r.delete(uri, null, null) }; throw t
+        }
+        values.clear()
+        values.put(MediaStore.Video.Media.IS_PENDING, 0)
+        r.update(uri, values, null, null)
+        val e = Entry(uri, prompt, seed, steps, ms, w, now, h)
+        write(ctx, read(ctx).apply { add(0, e) })
+        return e
+    }
+
     /** Puts [bmp] in place of [old]: a new file with the same prompt, seed and place in the list; the old file is
      *  deleted, and queue jobs that pointed at it point at the new one. */
     fun replace(ctx: Context, old: Entry, bmp: Bitmap): Entry {
@@ -91,13 +115,27 @@ object Gallery {
         return e
     }
 
-    fun isGif(ctx: Context, e: Entry) = runCatching { ctx.contentResolver.getType(e.uri) == "image/gif" }.getOrDefault(false)
+    fun mime(ctx: Context, e: Entry): String = runCatching { ctx.contentResolver.getType(e.uri) }.getOrNull() ?: "image/png"
+    fun isGif(ctx: Context, e: Entry) = mime(ctx, e) == "image/gif"
+    fun isVideo(ctx: Context, e: Entry) = mime(ctx, e).startsWith("video/")
+    /** A moving picture: a Wan clip, MP4 now, GIF before 2026-11-07. */
+    fun isClip(ctx: Context, e: Entry) = mime(ctx, e).let { it == "image/gif" || it.startsWith("video/") }
 
-    /** Newest first; entries whose picture was deleted elsewhere (e.g. in the phone's gallery) are dropped. */
+    /** Newest first; entries whose picture was deleted elsewhere (e.g. in the phone's gallery) are dropped.
+     *  One query of the phone's picture list instead of opening every file (192 opens took seconds). */
     fun list(ctx: Context): List<Entry> {
         val all = read(ctx)
+        val ids = HashSet<String>()
+        val asked = runCatching {
+            ctx.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Images.Media._ID),
+                "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?", arrayOf(Environment.DIRECTORY_PICTURES + "/Anima%"), null)?.use { c ->
+                while (c.moveToNext()) ids.add(c.getLong(0).toString())
+            } != null
+        }.getOrDefault(false)
+        val media = MediaStore.Images.Media.EXTERNAL_CONTENT_URI.toString()
         val alive = all.filter { e ->
-            runCatching { ctx.contentResolver.openFileDescriptor(e.uri, "r")?.close(); true }.getOrDefault(false)
+            if (asked && e.uri.toString().startsWith(media)) e.uri.lastPathSegment in ids
+            else runCatching { ctx.contentResolver.openFileDescriptor(e.uri, "r")?.close(); true }.getOrDefault(false)
         }
         if (alive.size != all.size) write(ctx, alive)
         return alive.sortedByDescending { it.savedAt }
@@ -108,9 +146,32 @@ object Gallery {
         write(ctx, read(ctx).filter { it.uri != e.uri })
     }
 
-    fun thumbnail(ctx: Context, e: Entry, px: Int): Bitmap? =
-        runCatching { ctx.contentResolver.loadThumbnail(e.uri, Size(px, px), null) }.getOrNull()
+    // Small previews already made, so reopening the gallery shows them at once (about 48 MB at most).
+    private val thumbs = object : android.util.LruCache<String, Bitmap>(48 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
+    }
 
-    fun full(ctx: Context, e: Entry): Bitmap? =
-        runCatching { ctx.contentResolver.openInputStream(e.uri)!!.use { android.graphics.BitmapFactory.decodeStream(it) } }.getOrNull()
+    fun cachedThumbnail(e: Entry, px: Int): Bitmap? = thumbs.get("${e.uri}@$px")
+
+    fun thumbnail(ctx: Context, e: Entry, px: Int): Bitmap? {
+        cachedThumbnail(e, px)?.let { return it }
+        return runCatching { ctx.contentResolver.loadThumbnail(e.uri, Size(px, px), null) }.getOrNull()
+            ?.also { thumbs.put("${e.uri}@$px", it) }
+    }
+
+    /** The picture for viewing: a 3072-pixel upscale is read at half or quarter size (no screen shows more, and the
+     *  whole one is 36 MB in memory and slow to read). */
+    fun full(ctx: Context, e: Entry, maxSide: Int = 2048): Bitmap? = if (isVideo(ctx, e)) runCatching {
+        android.media.MediaMetadataRetriever().run {
+            try { setDataSource(ctx, e.uri); getFrameAtTime(0) } finally { release() }
+        }
+    }.getOrNull() else runCatching {
+        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(ctx.contentResolver, e.uri)) { d, info, _ ->
+            var s = 1
+            while (maxOf(info.size.width, info.size.height) / (s * 2) >= maxSide) s *= 2
+            if (maxOf(info.size.width, info.size.height) / s > maxSide) s *= 2
+            d.setTargetSampleSize(s)
+            d.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+        }
+    }.getOrNull()
 }
