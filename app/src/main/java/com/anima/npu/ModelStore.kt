@@ -30,11 +30,11 @@ class ModelStore(
         val KLEIN = ModelStore(
             "klein", "FLUX.2 klein 4B",
             "FLUX.2 [klein] 4B is released by Black Forest Labs under the Apache 2.0 licence.",
-            "https://huggingface.co/sebekblessing/klein-qnn-8elite/resolve/main/manifest.json", "klein/")
+            "https://huggingface.co/sebekblessing/klein-4b-qnn-8elite/resolve/main/manifest.json", "klein/")
         val QWEN = ModelStore(
             "qwen", "Qwen-Image 2.1",
             "Qwen-Image 2.1 is released under the Qwen Research License: non-commercial use only. Built with Qwen.",
-            "https://huggingface.co/sebekblessing/image21-qnn-8elite/resolve/main/manifest.json", "qwen/")
+            "https://huggingface.co/sebekblessing/qwen-image-2.1-qnn-8elite/resolve/main/manifest.json", "qwen/")
         val FIBO = ModelStore(
             "fibo", "Fibo 2.0 edit",
             "Fibo 2.0 is released by Bria under CC BY-NC 4.0: non-commercial use only.",

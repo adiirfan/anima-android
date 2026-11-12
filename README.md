@@ -1,13 +1,14 @@
 # Anima on the neural unit
 
-Android app that draws pictures entirely on the Snapdragon 8 Elite neural unit (Qualcomm QNN / HTP v79), with three
-models to choose from:
+Android app that draws pictures and short clips entirely on the Snapdragon 8 Elite neural unit (Qualcomm QNN /
+HTP v79). Pick a model from one list (times measured on an iQOO 13 and a Samsung S25 Edge):
 
-- **Anima Turbo**: anime pictures in six sizes, about 6–7 s each at 8 steps on an iQOO 13, optional guide picture and
-  4× upscaler.
-- **FLUX.2 [klein] 4B**: pictures from plain sentences and picture editing.
-- **Qwen-Image 2.1** (4-step turbo): 768×768 pictures in about 1½ minutes, picture editing in about 3; a Small
-  version with a 2B prompt reader is a smaller download.
+- **Anima Turbo**: anime pictures in six sizes, about 6–17 s each, optional guide picture and 4× upscaler.
+- **FLUX.2 [klein] 4B**: pictures from plain sentences in about 8 s, picture editing in about 20 s.
+- **Qwen-Image 2.1 Turbo** (8 steps): 768×768 pictures in about 2½ minutes, picture editing in about 5.
+- **Fibo 2.0**: picture editing only, about 75 s.
+- **MOSS-Image** (8-step version): pictures in about 1¾ minutes.
+- **Wan 2.2 5B**: turns a picture into a short moving clip (768×768, 96 frames) in about 2½ minutes, saved as MP4.
 
 Pictures go into a **queue** that keeps drawing in the background, with a progress notification and a "Picture ready"
 notification for each one. A **Chat** tab talks to [Ling-3.0-tiny](https://huggingface.co/inclusionAI/Ling-3.0-tiny)
@@ -17,10 +18,14 @@ Qwen-Image, writes the prompt and adds it to the queue, and the picture appears 
 
 The app downloads the model files from Hugging Face:
 [anima-qnn-8elite](https://huggingface.co/sebekblessing/anima-qnn-8elite),
-[klein-qnn-8elite](https://huggingface.co/sebekblessing/klein-qnn-8elite),
-[image21-qnn-8elite](https://huggingface.co/sebekblessing/image21-qnn-8elite), and Ling from the `ling/` folder of
-anima-qnn-8elite. Anima and Qwen-Image are licensed for **non-commercial use only**; see the licence and notice files
-in each repo. Ling-3.0-tiny is MIT-licensed by inclusionAI.
+[klein-4b-qnn-8elite](https://huggingface.co/sebekblessing/klein-4b-qnn-8elite),
+[qwen-image-2.1-qnn-8elite](https://huggingface.co/sebekblessing/qwen-image-2.1-qnn-8elite),
+[fibo-qnn-8elite](https://huggingface.co/sebekblessing/fibo-qnn-8elite),
+[moss-qnn-8elite](https://huggingface.co/sebekblessing/moss-qnn-8elite),
+[wan22-qnn-8elite](https://huggingface.co/sebekblessing/wan22-qnn-8elite), and Ling from the `ling/` folder of
+anima-qnn-8elite. Anima, Qwen-Image and Fibo are licensed for **non-commercial use only**; FLUX.2 [klein] 4B,
+MOSS-Image and Wan 2.2 are Apache 2.0 (the Wan Turbo version's page names no licence). See the licence and notice
+files in each repo. Ling-3.0-tiny is MIT-licensed by inclusionAI.
 
 To build those files yourself from the original models, each model repo has the scripts and a step-by-step guide in
 its `build/` folder.
@@ -54,7 +59,7 @@ a new release of this repo, where installed copies look for updates; needs the G
 ## Layout
 
 - `app/src/main/cpp/` — engine on the QNN C API: `qnn_runner` (load/run one compiled piece), `pipeline` (Anima),
-  `klein` (FLUX.2 klein), `qimg` (Qwen-Image), `gemma` (shared context code), `jni_bridge`.
+  `klein` (FLUX.2 klein), `qimg` (Qwen-Image), `fibo`, `moss`, `wan`, `gemma` (shared context code), `jni_bridge`.
 - `app/src/main/java/com/anima/npu/` — Compose screens, tokenizers (ComfyUI's rules), downloads, gallery, usage
   bar, self-test; the queue (`QueueStore`, `QueueService`, `Drawer`), the chat (`LocalLing` starts the server,
   `ChatController` runs a turn and the `draw_picture` tool, `ChatScreen`), `NpuGate` (the queue and the chat take
