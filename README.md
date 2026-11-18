@@ -1,7 +1,8 @@
 # Anima on the neural unit
 
-Android app that draws pictures and short clips entirely on the Snapdragon 8 Elite neural unit (Qualcomm QNN /
-HTP v79). Pick a model from one list (times measured on an iQOO 13 and a Samsung S25 Edge):
+Android app that draws pictures and short clips entirely on the phone's neural unit (Qualcomm QNN / HTP), on the
+**Snapdragon 8 Elite** (HTP v79) and the **Snapdragon 8 Elite Gen 5** (HTP v81). Other phones get a "Device not
+supported" page. Pick a model from one list (times measured on an iQOO 13 and a Samsung S25 Edge, both 8 Elite):
 
 - **Anima Turbo**: anime pictures in six sizes, about 6–17 s each, optional guide picture and 4× upscaler.
 - **FLUX.2 [klein] 4B**: pictures from plain sentences in about 8 s, picture editing in about 20 s.
@@ -16,14 +17,22 @@ running on the same neural unit (through llama.cpp's Hexagon backend); ask it fo
 Qwen-Image, writes the prompt and adds it to the queue, and the picture appears in the conversation. The app also
 **updates itself** from this repo's releases.
 
-The app downloads the model files from Hugging Face:
+On first launch a setup screen lists the models this phone can run, with their download sizes, as tick boxes; the
+chosen ones download at the same time, and Settings opens the same screen later. The compiled model files only run on
+the chip they were built for, so the app picks the repos by chip. On the Snapdragon 8 Elite it downloads from:
 [anima-qnn-8elite](https://huggingface.co/sebekblessing/anima-qnn-8elite),
 [klein-4b-qnn-8elite](https://huggingface.co/sebekblessing/klein-4b-qnn-8elite),
 [qwen-image-2.1-qnn-8elite](https://huggingface.co/sebekblessing/qwen-image-2.1-qnn-8elite),
 [fibo-qnn-8elite](https://huggingface.co/sebekblessing/fibo-qnn-8elite),
 [moss-qnn-8elite](https://huggingface.co/sebekblessing/moss-qnn-8elite),
-[wan22-qnn-8elite](https://huggingface.co/sebekblessing/wan22-qnn-8elite), and Ling from the `ling/` folder of
-anima-qnn-8elite. Anima, Qwen-Image and Fibo are licensed for **non-commercial use only**; FLUX.2 [klein] 4B,
+[wan22-qnn-8elite](https://huggingface.co/sebekblessing/wan22-qnn-8elite).
+On the 8 Elite Gen 5 it uses
+[anima-qnn-8elite-gen5](https://huggingface.co/sebekblessing/anima-qnn-8elite-gen5),
+[fibo-qnn-8elite-gen5](https://huggingface.co/sebekblessing/fibo-qnn-8elite-gen5),
+[moss-qnn-8elite-gen5](https://huggingface.co/sebekblessing/moss-qnn-8elite-gen5) and
+[wan22-qnn-8elite-gen5](https://huggingface.co/sebekblessing/wan22-qnn-8elite-gen5); FLUX.2 klein and Qwen-Image are
+not built for that chip yet. The two chat models (Ling-3.0-tiny and the smaller Qwen3.5 0.8B) are plain llama.cpp
+files that run on both chips, from [anima-chat-models](https://huggingface.co/sebekblessing/anima-chat-models). Anima, Qwen-Image and Fibo are licensed for **non-commercial use only**; FLUX.2 [klein] 4B,
 MOSS-Image and Wan 2.2 are Apache 2.0 (the Wan Turbo version's page names no licence). See the licence and notice
 files in each repo. Ling-3.0-tiny is MIT-licensed by inclusionAI.
 

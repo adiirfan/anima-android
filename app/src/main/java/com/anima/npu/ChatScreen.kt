@@ -88,6 +88,14 @@ import java.util.Date
 fun ChatScreen(chat: ChatController, isInstalled: (String) -> Boolean, onDownload: () -> Unit,
                onOpen: (Gallery.Entry) -> Unit, onMenu: () -> Unit) {
     val ctx = LocalContext.current
+    // chat runs on the neural unit too (llama.cpp's Hexagon build for v79 and v81 only)
+    if (!Chip.supported) {
+        Column(Modifier.fillMaxSize()) {
+            ChatBar(onMenu, "Chat")
+            DeviceNotSupported(Modifier.padding(24.dp))
+        }
+        return
+    }
     // which chat model (Settings or the pill in the composer); everything that depends on it reads this
     var slots by remember { mutableIntStateOf(LocalLing.expertSlots(ctx)) }
     val ready = remember(slots) { LocalLing.ready(ctx) } || isInstalled(LocalLing.store(ctx).id)

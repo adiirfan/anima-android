@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -34,12 +35,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
-/** The app's settings: Ling's memory use and the usage bar. */
+/** The app's settings: which models to download, Ling's memory use and the usage bar. */
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onSetup: () -> Unit) {
     val ctx = LocalContext.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Models", style = MaterialTheme.typography.titleSmall)
+        Text("This phone: ${Chip.label}." + if (Chip.supported) "" else " " + Chip.SUPPORTED_TEXT,
+            style = MaterialTheme.typography.bodySmall)
+        if (Chip.supported) OutlinedButton(onClick = onSetup) { Text("Choose models to download") }
+
+        HorizontalDivider()
+
         Text("Chat model and memory use", style = MaterialTheme.typography.titleSmall)
         // (setting, label, what it means): memory measured on the iQOO 13, 2026-10-09; Balanced and Low writing speeds
         // on the S25 Edge, warm, after the 2026-10-10 streaming changes (were 15 and 14)

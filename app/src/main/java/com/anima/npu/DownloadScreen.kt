@@ -46,7 +46,8 @@ fun DownloadScreen(
         mutableStateOf(if (update) current!! else manifest?.variants?.firstOrNull { it.id != current }?.id ?: "standard")
     }
     var status by remember { mutableStateOf("") }
-    val busy = Installer.running
+    val busy = Installer.isRunning(store.id)
+    val task = Installer.task(store.id)
 
     if (onBack != null) BackHandler(onBack = onBack)
     LaunchedEffect(Unit) {
@@ -90,10 +91,10 @@ fun DownloadScreen(
                 Button(onClick = { Installer.start(ctx, store, m, choice, beforeSwap) }, enabled = !busy && (update || choice != current)) {
                     Text(if (current == null) "Download" else if (update) "Update" else "Switch")
                 }
-                if (busy) OutlinedButton(onClick = { Installer.cancel(ctx) }) { Text("Cancel") }
+                if (busy) OutlinedButton(onClick = { Installer.cancel(store.id) }) { Text("Cancel") }
             }
-            if (busy) LinearProgressIndicator(progress = { Installer.fraction }, modifier = Modifier.fillMaxWidth())
-            if (Installer.status.isNotEmpty()) Text(Installer.status)
+            if (busy) LinearProgressIndicator(progress = { task?.fraction ?: 0f }, modifier = Modifier.fillMaxWidth())
+            task?.status?.takeIf { it.isNotEmpty() }?.let { Text(it) }
         }
         if (status.isNotEmpty()) Text(status)
         Text(store.licence, style = MaterialTheme.typography.bodySmall)

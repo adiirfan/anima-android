@@ -200,6 +200,7 @@ class MainActivity : ComponentActivity() {
         val selfTest = intent.getBooleanExtra("selftest", false)
         val loadOpts = intent.getIntExtra("loadopts", -1)
         val memOverride = intent.getIntExtra("memmode", -1)
+        if (BuildConfig.DEBUG && File(filesDir, "test-unsupported").exists()) Chip.testOverride = Chip.Kind.UNSUPPORTED
         Engines.init(this, if (memOverride >= 0) memOverride else if (selfTest) 1 else -1, loadOpts)
         Queue.init(this)
         openUri.value = intent.getStringExtra("openUri")
@@ -232,20 +233,29 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 // a finished download, wherever the user is: the engine reads the new files (sizes, tables) afresh
-                LaunchedEffect(Installer.finished) {
-                    val (sid, v) = Installer.finished ?: return@LaunchedEffect
-                    Installer.finished = null
-                    installedOf = installedOf + (sid to v); downloadFor = null; updating = false
-                    updateBytesOf = updateBytesOf + (sid to 0L)
-                    Engines.invalidate(sid)
+                // (several can finish at once now that downloads run side by side)
+                LaunchedEffect(Installer.finished.size) {
+                    while (Installer.finished.isNotEmpty()) {
+                        val (sid, v) = Installer.finished.removeAt(0)
+                        installedOf = installedOf + (sid to v)
+                        if (downloadFor == sid) { downloadFor = null; updating = false }
+                        updateBytesOf = updateBytesOf + (sid to 0L)
+                        Engines.invalidate(sid)
+                    }
                 }
                 val prefs = remember { getSharedPreferences("anima", MODE_PRIVATE) }
+                // the first-run setup (choose models), until it is finished or skipped; phones that already had a
+                // model when this screen arrived never see it, and Settings opens it again
+                var showSetup by remember {
+                    mutableStateOf(!selfTest && !prefs.getBoolean("setupDone", false) && ModelStore.ALL.all { installedOf[it.id] == null })
+                }
                 val create = remember {
                     CreateState().also {
                         it.memoryMode = prefs.getInt("memoryMode", 1)
                         it.tier = prefs.getInt("tier", 0).coerceIn(0, SIZE_TIERS.size - 1)
                         it.shape = prefs.getInt("shape", 0).coerceIn(0, SHAPES.size - 1)
-                        it.model = prefs.getString("model", "anima") ?: "anima"
+                        it.model = (prefs.getString("model", "anima") ?: "anima")
+                            .takeIf { m -> ModelStore.ALL.any { st -> st.id == m && st.available } } ?: "anima"
                         it.qwenDrawing = prefs.getString("qwenDrawing", "qwen").takeIf { d -> d == "noctq" } ?: "qwen"
                     }
                 }
@@ -270,7 +280,7 @@ class MainActivity : ComponentActivity() {
                 val openMenu: () -> Unit = { navScope.launch { drawer.open() } }
                 // The pages live in a side menu, as in sysmon's phone app, instead of a bar along the bottom that
                 // took a strip of every screen (2026-10-09).
-                fun go(t: Int) { downloadFor = null; updating = false; showQueue = false; open = null; tab = t; navScope.launch { drawer.close() } }
+                fun go(t: Int) { showSetup = false; downloadFor = null; updating = false; showQueue = false; open = null; tab = t; navScope.launch { drawer.close() } }
                 ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = open == null, drawerContent = {
                     ModalDrawerSheet(Modifier.safeDrawingPadding()) {
                         Text("Anima", Modifier.padding(start = 28.dp, top = 20.dp, bottom = 16.dp),
@@ -316,13 +326,17 @@ class MainActivity : ComponentActivity() {
                 ) { pad ->
                     Box(Modifier.padding(pad).fillMaxSize()) {
                         when {
-                            ModelStore.PICTURE.all { installedOf[it.id] == null } && !selfTest || downloadFor != null -> {
+                            showSetup -> SetupScreen(firstRun = !prefs.getBoolean("setupDone", false), onDone = {
+                                prefs.edit().putBoolean("setupDone", true).apply()
+                                showSetup = false; tab = 0
+                            })
+                            downloadFor != null -> {
                                 val st = ModelStore.byId(downloadFor ?: "anima")
                                 DownloadScreen(
                                     store = st,
                                     current = installedOf[st.id],
                                     beforeSwap = { Engine.release() },
-                                    onBack = if (ModelStore.PICTURE.any { installedOf[it.id] != null }) ({ downloadFor = null; updating = false }) else null,
+                                    onBack = { downloadFor = null; updating = false },
                                     update = updating,
                                 )
                             }
@@ -356,7 +370,7 @@ class MainActivity : ComponentActivity() {
                             }
                             tab == 1 -> ChatScreen(Chat.get(ctx), isInstalled = { installedOf[it] != null },
                                 onDownload = { downloadFor = LocalLing.store(ctx).id }, onOpen = { open = it }, onMenu = openMenu)
-                            tab == 3 -> Column { ChatBar(openMenu, "Settings"); SettingsScreen() }
+                            tab == 3 -> Column { ChatBar(openMenu, "Settings"); SettingsScreen(onSetup = { showSetup = true }) }
                             else -> Column { ChatBar(openMenu, "Gallery"); GalleryGrid(onOpen = { open = it }) }
                         }
                     }
@@ -424,6 +438,10 @@ fun Create(
             if (s.edit == null) s.status = "Could not read that picture"
         }
     }
+    if (!Chip.supported) {
+        DeviceNotSupported(Modifier.padding(16.dp))
+        return
+    }
     Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // One list of drawing models (2026-11-06: five models and Noct Q no longer fit as buttons in a row).
         // Noct Q is Qwen with other drawing files, copied over the cable into qwen/noctq/: listed when present.
@@ -433,7 +451,7 @@ fun Create(
                 Triple("qwen", "noctq", "Noct Q").takeIf { File(ModelStore.QWEN.modelDir(ctx), "$NOCTQ_DIR/sp31.bin").isFile },
                 Triple("fibo", null, "Fibo 2.0 (edits)"), Triple("moss", null, "MOSS-Image"),
                 Triple("wan", null, "Wan 2.2 (moving picture)"),
-            )
+            ).filter { ModelStore.byId(it.first).available }   // models not built for this phone's chip are left out
         }
         var menu by remember { mutableStateOf(false) }
         Box {
@@ -459,8 +477,12 @@ fun Create(
                 wan -> " It turns one of your pictures into a short looping video that moves as you describe."
                 else -> ""
             })
-            Button(onClick = onDownload, enabled = !Installer.running) { Text("Download…") }
-            if (Installer.running) Text("Another download is running: ${Installer.status}", style = MaterialTheme.typography.bodySmall)
+            val task = Installer.task(s.model)
+            Button(onClick = onDownload, enabled = !Installer.isRunning(s.model)) { Text("Download…") }
+            if (task != null && task.running) {
+                Text("Downloading: ${task.status}", style = MaterialTheme.typography.bodySmall)
+                LinearProgressIndicator(progress = { task.fraction }, modifier = Modifier.fillMaxWidth())
+            }
             return@Column
         }
         OutlinedTextField(s.prompt, { s.prompt = it }, Modifier.fillMaxWidth(),
@@ -543,9 +565,10 @@ fun Create(
             Text("Model: $modelLabel", style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = onChangeModel, enabled = !s.busy) { Text("Change") }
         }
-        if (Installer.running) {
-            Text("Updating the model: ${Installer.status}", style = MaterialTheme.typography.bodySmall)
-            LinearProgressIndicator(progress = { Installer.fraction }, modifier = Modifier.fillMaxWidth())
+        val myTask = Installer.task(s.model)?.takeIf { it.running }
+        if (myTask != null) {
+            Text("Updating the model: ${myTask.status}", style = MaterialTheme.typography.bodySmall)
+            LinearProgressIndicator(progress = { myTask.fraction }, modifier = Modifier.fillMaxWidth())
         } else if (updateBytes > 0) Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Model update available (%.1f GB)".format(updateBytes / 1e9), style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = onUpdate, enabled = !s.busy) { Text("Update") }
@@ -554,8 +577,8 @@ fun Create(
             enqueueFromCreate(ctx, s)
             if (!s.seedLocked) s.seed = Random.nextLong(0, 1_000_000_000)   // the next job draws a new picture
             s.status = "Added to the queue"
-        }, enabled = !Installer.running && s.prompt.isNotBlank() && installed && !fiboNeedsPicture, modifier = Modifier.fillMaxWidth()) {
-            Text(if (Installer.running) "Add to queue (after the update)" else "Add to queue")
+        }, enabled = myTask == null && s.prompt.isNotBlank() && installed && !fiboNeedsPicture, modifier = Modifier.fillMaxWidth()) {
+            Text(if (myTask != null) "Add to queue (after the update)" else "Add to queue")
         }
         // the newest finished picture from this screen, and how the queue is doing
         val tick by Queue.store.changed.collectAsState()
@@ -603,7 +626,7 @@ fun Create(
                         }
                         s.busy = false
                     }
-                }, enabled = !s.busy && !Installer.running) { Text("Upscale 4×") }
+                }, enabled = !s.busy && !Installer.isRunning("anima")) { Text("Upscale 4×") }
             }
         }
         Spacer(Modifier.height(24.dp))

@@ -18,47 +18,66 @@ import java.security.MessageDigest
  * <name>.part, is checked against the manifest, then renamed, so a broken file never reaches the engine.
  */
 class ModelStore(
-    val id: String, val title: String, val licence: String, private val manifestUrl: String,
+    val id: String, val title: String, val licence: String,
+    private val eliteUrl: String,   // the file list for Snapdragon 8 Elite (Hexagon v79)
+    private val gen5Url: String?,   // the same for 8 Elite Gen 5 (Hexagon v81); null when not built for it yet
     private val sub: String,  // folder under files/models ("" for Anima, which predates the others)
 ) {
+    /** Where this phone's file list is, or null when the model has no build for its chip. */
+    val manifestUrl: String?
+        get() = when (Chip.kind) {
+            Chip.Kind.ELITE -> eliteUrl
+            Chip.Kind.ELITE_GEN5 -> gen5Url
+            Chip.Kind.UNSUPPORTED -> null
+        }
+
+    /** Whether this phone can download and run the model. */
+    val available get() = manifestUrl != null
+
     companion object {
+        private const val HF = "https://huggingface.co/sebekblessing"
+        // the chat models are plain llama.cpp files that run on either chip: one repo of their own
+        private const val CHAT = "$HF/anima-chat-models/resolve/main"
         val ANIMA = ModelStore(
             "anima", "Anima",
             "Anima is licensed for non-commercial use (CircleStone Labs Non-Commercial License). Pictures you make may be used for anything.",
             // multi-size + guide set; manifest.json stays for older app builds
-            "https://huggingface.co/sebekblessing/anima-qnn-8elite/resolve/main/manifest2.json", "")
+            "$HF/anima-qnn-8elite/resolve/main/manifest2.json", "$HF/anima-qnn-8elite-gen5/resolve/main/manifest2.json", "")
         val KLEIN = ModelStore(
             "klein", "FLUX.2 klein 4B",
             "FLUX.2 [klein] 4B is released by Black Forest Labs under the Apache 2.0 licence.",
-            "https://huggingface.co/sebekblessing/klein-4b-qnn-8elite/resolve/main/manifest.json", "klein/")
+            "$HF/klein-4b-qnn-8elite/resolve/main/manifest.json", null, "klein/")
         val QWEN = ModelStore(
             "qwen", "Qwen-Image 2.1",
             "Qwen-Image 2.1 is released under the Qwen Research License: non-commercial use only. Built with Qwen.",
-            "https://huggingface.co/sebekblessing/qwen-image-2.1-qnn-8elite/resolve/main/manifest.json", "qwen/")
+            "$HF/qwen-image-2.1-qnn-8elite/resolve/main/manifest.json", null, "qwen/")
         val FIBO = ModelStore(
             "fibo", "Fibo 2.0 edit",
             "Fibo 2.0 is released by Bria under CC BY-NC 4.0: non-commercial use only.",
-            "https://huggingface.co/sebekblessing/fibo-qnn-8elite/resolve/main/manifest.json", "fibo/")
+            "$HF/fibo-qnn-8elite/resolve/main/manifest.json", "$HF/fibo-qnn-8elite-gen5/resolve/main/manifest.json", "fibo/")
         val MOSS = ModelStore(
             "moss", "MOSS-Image",
             "MOSS-Image and its 8-step add-on are released under the Apache 2.0 licence.",
-            "https://huggingface.co/sebekblessing/moss-qnn-8elite/resolve/main/manifest.json", "moss/")
+            "$HF/moss-qnn-8elite/resolve/main/manifest.json", "$HF/moss-qnn-8elite-gen5/resolve/main/manifest.json", "moss/")
         val WAN = ModelStore(
             "wan", "Wan 2.2 clips",
             "Wan 2.2 (Alibaba), its LightTAE decoder and the umT5 prompt reader are released under the Apache 2.0 " +
                 "licence. The Turbo version's page names no licence.",
-            "https://huggingface.co/sebekblessing/wan22-qnn-8elite/resolve/main/manifest.json", "wan/")
+            "$HF/wan22-qnn-8elite/resolve/main/manifest.json", "$HF/wan22-qnn-8elite-gen5/resolve/main/manifest.json", "wan/")
         val LING = ModelStore(
             "ling", "Ling-3.0-tiny (chat)",
             "Ling-3.0-tiny is released by inclusionAI under the MIT licence.",
-            "https://huggingface.co/sebekblessing/anima-qnn-8elite/resolve/main/ling/manifest.json", "ling/")
+            "$CHAT/ling/manifest.json", "$CHAT/ling/manifest.json", "ling/")
         val SMALLCHAT = ModelStore(
             "smallchat", "Qwen3.5 0.8B (small chat)",
             "Qwen3.5 0.8B is released by the Qwen team (Alibaba) under the Apache 2.0 licence.",
-            "https://huggingface.co/sebekblessing/anima-qnn-8elite/resolve/main/smallchat/manifest.json", "smallchat/")
+            "$CHAT/smallchat/manifest.json", "$CHAT/smallchat/manifest.json", "smallchat/")
         val ALL = listOf(ANIMA, KLEIN, QWEN, FIBO, MOSS, WAN, LING, SMALLCHAT)
         /** The picture models, for the Create screen's picker. */
         val PICTURE = listOf(ANIMA, KLEIN, QWEN, FIBO, MOSS)
+        /** The first-run setup's lists: what makes pictures (and clips), and the chat models. */
+        val SETUP_PICTURE = listOf(ANIMA, MOSS, FIBO, WAN, QWEN, KLEIN)
+        val SETUP_CHAT = listOf(LING, SMALLCHAT)
         fun byId(id: String) = ALL.first { it.id == id }
     }
 
@@ -163,7 +182,8 @@ class ModelStore(
     /** Fetches the current manifest from Hugging Face (through DownloadManager) and caches it. */
     suspend fun fetchManifest(ctx: Context): Manifest {
         modelDir(ctx).mkdirs()
-        val id = enqueue(ctx, manifestUrl, "manifest.json.part", "$title model list")
+        val url = manifestUrl ?: error("$title is not available for ${Chip.label}")
+        val id = enqueue(ctx, url, "manifest.json.part", "$title model list")
         waitFor(ctx, listOf(id)) {}
         val part = File(modelDir(ctx), "manifest.json.part")
         val m = parse(part.readText())
@@ -220,13 +240,5 @@ class ModelStore(
         // files the installed set no longer uses (the 16-bit word table once the 8-bit one is in, 311 MB)
         val keep = wanted.map { it.name }.toSet() + setOf("manifest.json", "installed.json", "variant.txt")
         dir.listFiles()?.filter { it.isFile && it.name !in keep && !it.name.endsWith(".part") }?.forEach { it.delete() }
-    }
-
-    fun cancelAll(ctx: Context) {
-        val c = dm(ctx).query(DownloadManager.Query().setFilterByStatus(
-            DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or DownloadManager.STATUS_PAUSED))
-        val ids = ArrayList<Long>()
-        c.use { while (it.moveToNext()) ids += it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)) }
-        if (ids.isNotEmpty()) dm(ctx).remove(*ids.toLongArray())
     }
 }
