@@ -13,6 +13,6 @@ for f in libllama-server-impl libllama-common libmtmd libllama libggml libggml-b
 done
 for f in $OUT/libllama*.so $OUT/libmtmd.so $OUT/libggml*.so; do $STRIP --strip-unneeded "$f"; done
 # the chip's half is built for the DSP, which the ARM strip does not understand
-cp $B/ggml/src/ggml-hexagon/libggml-htp-v79.so $OUT/libggml-htp-v79.so
+for v in v79 v81; do cp $B/ggml/src/ggml-hexagon/libggml-htp-$v.so $OUT/libggml-htp-$v.so; done   # 8 Elite, 8 Elite Gen 5
 ls -la $OUT | grep -E "llama|ggml|mtmd"
 du -ch $OUT/libllama*.so $OUT/libmtmd.so $OUT/libggml*.so | tail -1
