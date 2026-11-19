@@ -42,9 +42,10 @@ fun SettingsScreen(onSetup: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Models", style = MaterialTheme.typography.titleSmall)
-        Text("This phone: ${Chip.label}." + if (Chip.supported) "" else " " + Chip.SUPPORTED_TEXT,
+        Text("This phone: ${Chip.label}." + if (Chip.supported) "" else " " + Chip.SUPPORTED_TEXT +
+            " On this phone MOSS-Image and Fibo run on the graphics chip instead, more slowly.",
             style = MaterialTheme.typography.bodySmall)
-        if (Chip.supported) OutlinedButton(onClick = onSetup) { Text("Choose models to download") }
+        if (ModelStore.ALL.any { it.available }) OutlinedButton(onClick = onSetup) { Text("Choose models to download") }
 
         HorizontalDivider()
 
@@ -102,13 +103,25 @@ fun SettingsScreen(onSetup: () -> Unit) {
             Switch(StatsBar.shown(ctx), { StatsBar.set(ctx, it) })
         }
 
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (Chip.supported) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Upscale every new picture 4×", style = MaterialTheme.typography.titleSmall)
                 Text("Each picture is made 4 times bigger before it is saved (768 becomes 3072), which adds a few " +
                     "seconds. Uses the upscaler that comes with Anima. Clips are not upscaled.", style = MaterialTheme.typography.bodySmall)
             }
             Switch(Upscaler.auto(ctx), { Upscaler.setAuto(ctx, it) })
+        }
+
+        if (Chip.supported) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Draw MOSS and Fibo with the graphics chip", style = MaterialTheme.typography.titleSmall)
+                Text(if (GpuEngine.mossReady(ctx) || GpuEngine.fiboReady(ctx))
+                    "Uses the graphics chip instead of the AI chip. Several times slower, for testing the engine " +
+                        "that phones without an AI chip use."
+                else "Needs the graphics-chip files in models/moss/gpu or models/fibo/gpu.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(GpuEngine.forced(ctx), { GpuEngine.setForced(ctx, it) }, enabled = GpuEngine.mossReady(ctx) || GpuEngine.fiboReady(ctx))
         }
     }
 }

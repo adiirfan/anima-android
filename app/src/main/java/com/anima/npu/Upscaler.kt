@@ -29,7 +29,7 @@ object Upscaler {
         ctx.getSharedPreferences("anima", Context.MODE_PRIVATE).edit().putBoolean("autoUpscale", on).apply()
     }
 
-    fun available(ctx: Context) = ModelStore.ANIMA.installed(ctx) != null
+    fun available(ctx: Context) = Chip.supported && ModelStore.ANIMA.installed(ctx) != null   // runs on the AI chip
 
     /** The picture 4x bigger. Throws with the reason when it cannot. */
     suspend fun upscale(ctx: Context, bmp: Bitmap): Bitmap = withContext(Dispatchers.Default) {

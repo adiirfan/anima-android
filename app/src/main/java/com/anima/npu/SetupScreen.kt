@@ -66,20 +66,23 @@ fun SetupScreen(firstRun: Boolean, onDone: () -> Unit) {
     if (!firstRun) androidx.activity.compose.BackHandler(onBack = onDone)
     Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(if (firstRun) "Welcome to Anima" else "Choose models", style = MaterialTheme.typography.headlineSmall)
-        if (!Chip.supported) {
+        if (ModelStore.ALL.none { it.available }) {
             DeviceNotSupported()
             Button(onClick = onDone) { Text("Continue") }
             return@Column
         }
-        Text("Choose what to download. Everything runs on this phone's neural unit (${Chip.label}); nothing is sent " +
-            "anywhere after the download. You can add or remove models later in Settings.",
+        Text(if (Chip.supported) "Choose what to download. Everything runs on this phone's neural unit (${Chip.label}); " +
+                "nothing is sent anywhere after the download. You can add or remove models later in Settings."
+            else "This phone has ${Chip.label}, which has no AI chip the app supports. MOSS-Image (new pictures) and " +
+                "Fibo (picture edits) can still run on its graphics chip, more slowly: several minutes a picture. " +
+                "Nothing is sent anywhere after the download.",
             style = MaterialTheme.typography.bodySmall)
 
         val all = ModelStore.SETUP_PICTURE + ModelStore.SETUP_CHAT
         val manifests = remember { mutableStateMapOf<String, ModelStore.Manifest>() }
         var listStatus by remember { mutableStateOf("Getting the model lists…") }
         // nothing ticked until the user picks; Anima is the one most people want, so it starts ticked
-        val chosen = remember { mutableStateMapOf("anima" to true) }
+        val chosen = remember { mutableStateMapOf((if (Chip.supported) "anima" else "moss") to true) }
         var started by remember { mutableStateOf(Installer.tasks.isNotEmpty()) }
 
         LaunchedEffect(Unit) {

@@ -62,7 +62,8 @@ fun DownloadScreen(
         if (onBack != null) TextButton(onClick = onBack) { Text("‹ Back") }
         Text((if (current == null) "Download " else if (update) "Update " else "Change ") + store.title,
             style = MaterialTheme.typography.headlineSmall)
-        Text("Everything runs on the phone's neural unit; nothing is sent anywhere after this download.",
+        Text("Everything runs on the phone's " + (if (store.onGraphicsChip) "graphics chip" else "neural unit") +
+            "; nothing is sent anywhere after this download.",
             style = MaterialTheme.typography.bodySmall)
         val m = manifest
         if (m != null) {

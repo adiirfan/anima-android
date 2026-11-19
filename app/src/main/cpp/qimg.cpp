@@ -508,7 +508,9 @@ bool QwenImage::generate(const std::vector<int32_t>& ids, uint64_t seed, int W, 
         }
     }
     r->msPrefix = nowMs() - t2;
-    for (const char* n : {"k0", "v0", "k31", "v31", "xt32"}) if (bufs_.count(n)) dumpRaw(n, bufs_[n].p, bufs_[n].bytes);
+    for (int j = 0; j < 32; j++) for (std::string n : {"k" + std::to_string(j), "v" + std::to_string(j)}) if (bufs_.count(n)) dumpRaw(n.c_str(), bufs_[n].p, bufs_[n].bytes);
+    if (bufs_.count("xt32")) dumpRaw("xt32", bufs_["xt32"].p, bufs_["xt32"].bytes);
+    if (getenv("QIMG_PREFIX_ONLY")) _exit(0);
     if (split_) {
         double tl = nowMs();
         if (!loadDrawing(err)) return false;
@@ -583,6 +585,7 @@ bool QwenImage::generate(const std::vector<int32_t>& ids, uint64_t seed, int W, 
         for (size_t k = 0; k < z.size(); k++) z[k] += (float)(sig[i + 1] - sig[i]) * (float)vel[k];
     }
     r->msSteps = nowMs() - t3;
+    if (getenv("QIMG_DUMP")) { FILE* f = fopen((std::string(getenv("QIMG_DUMP")) + "/final.f32").c_str(), "wb"); if (f) { fwrite(z.data(), 4, z.size(), f); fclose(f); } }
 
     double t4 = nowMs();
     {

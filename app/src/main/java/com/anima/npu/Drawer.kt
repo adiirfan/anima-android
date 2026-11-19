@@ -16,8 +16,8 @@ object Drawer {
         val err = when (j.model) {
             "klein" -> Engines.ensureKlein()
             "qwen" -> Engines.ensureQwen(j.qwenDrawing)
-            "fibo" -> Engines.ensureFibo()
-            "moss" -> Engines.ensureMoss()
+            "fibo" -> if (GpuEngine.useForFibo(ctx)) null else Engines.ensureFibo()
+            "moss" -> if (GpuEngine.useForMoss(ctx)) null else Engines.ensureMoss()
             "wan" -> Engines.ensureWan()
             "upscale" -> null
             else -> Engines.ensureAnima()
@@ -47,12 +47,19 @@ object Drawer {
         }
         val px = when (j.model) {
             "moss" -> {
-                val (cond, unc) = MossReader.read(ctx, ModelStore.MOSS.modelDir(ctx), j.prompt)
-                Engine.mossGenerate(cond, unc, j.seed, p)
+                val gpu = GpuEngine.useForMoss(ctx)
+                val (cond, unc) = MossReader.read(ctx, ModelStore.MOSS.modelDir(ctx), j.prompt, aiChip = Chip.supported)
+                if (gpu) {
+                    Engines.release()   // whatever the AI chip still holds: the graphics chip needs the memory
+                    GpuEngine.mossGenerate(ctx, cond, j.seed, p)
+                } else Engine.mossGenerate(cond, unc, j.seed, p)
             }
             "fibo" -> {
                 val e = src?.let { guidePixels(it, w, h) } ?: error("Fibo only edits pictures: choose a picture to edit")
-                Engine.fiboGenerate(QwenImageTokens.encodeFibo(j.prompt), j.seed, e, p)
+                if (GpuEngine.useForFibo(ctx)) {
+                    Engines.release()   // whatever the AI chip still holds: the graphics chip needs the memory
+                    GpuEngine.fiboGenerate(ctx, j.prompt, j.seed, e, p)
+                } else Engine.fiboGenerate(QwenImageTokens.encodeFibo(j.prompt), j.seed, e, p)
             }
             "qwen" -> {
                 val e = if (ModelStore.QWEN.installed(ctx) == "small") null else src?.let { guidePixels(it, w, h) }

@@ -35,6 +35,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize" />
         <!-- The app's icon in the launcher: one entry per built-in icon, only one switched on at a time (AppIcon.kt,
              Settings > App icon), the way apps such as Reddit let you pick their icon. -->

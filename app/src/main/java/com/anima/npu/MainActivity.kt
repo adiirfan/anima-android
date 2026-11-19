@@ -6,6 +6,18 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.IconButton
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.background
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -47,6 +59,11 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Badge
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Slider
@@ -157,6 +174,13 @@ const val MOSS_TIME = "8 steps · about 1 min 30 s"   // MOSS-Image SFT + 8-step
 /** The models that draw one 768x768 size only, with no size or memory choices. */
 val BIG_MODELS = setOf("qwen", "fibo", "moss", "wan")
 const val WAN_TIME = "17 frames, a looping video · about 2.5 min on the iQOO 13"
+const val WAN_LONG_TIME = "49 frames, a 3-second video · about 3.5 min"   // the Fold, 2026-11-18 (206 s)
+const val MOSS_GPU_TIME = "8 steps · about 4 min on the graphics chip"   // the Fold in the app, 2026-11-19 (232 s)
+const val FIBO_GPU_TIME = "edits only · 4 steps · about 9 min on the graphics chip"   // the Fold in the app, 2026-11-19 (532 s)
+
+/** The clip length the phone's Wan files make: frames.txt says 49 for the 3-second set, none means 17. */
+fun wanTime(ctx: android.content.Context) =
+    if (java.io.File(ModelStore.WAN.modelDir(ctx), "frames.txt").takeIf { it.isFile }?.readText()?.trim() == "49") WAN_LONG_TIME else WAN_TIME
 val SHAPES = listOf("Square", "Tall 9:16", "Wide 16:9")
 private val SIZES = listOf(
     listOf(512 to 512, 384 to 672, 672 to 384),
@@ -281,8 +305,8 @@ class MainActivity : ComponentActivity() {
                 // The pages live in a side menu, as in sysmon's phone app, instead of a bar along the bottom that
                 // took a strip of every screen (2026-10-09).
                 fun go(t: Int) { showSetup = false; downloadFor = null; updating = false; showQueue = false; open = null; tab = t; navScope.launch { drawer.close() } }
-                ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = open == null, drawerContent = {
-                    ModalDrawerSheet(Modifier.safeDrawingPadding()) {
+                val wide = isWide()
+                val menu: @Composable ColumnScope.() -> Unit = {
                         Text("Anima", Modifier.padding(start = 28.dp, top = 20.dp, bottom = 16.dp),
                             style = MaterialTheme.typography.titleLarge)
                         val qTick by Queue.store.changed.collectAsState()
@@ -298,8 +322,8 @@ class MainActivity : ComponentActivity() {
                         item("Gallery", AppIcons.Gallery, here && tab == 2) { go(2) }
                         item("Queue", AppIcons.Queue, showQueue, badge = waiting) { go(0); showQueue = true }
                         item("Settings", AppIcons.Settings, here && tab == 3) { go(3) }
-                    }
-                }) {
+                }
+                val body: @Composable () -> Unit = {
                 Scaffold(
                     modifier = Modifier.safeDrawingPadding(),
                     topBar = {
@@ -326,21 +350,21 @@ class MainActivity : ComponentActivity() {
                 ) { pad ->
                     Box(Modifier.padding(pad).fillMaxSize()) {
                         when {
-                            showSetup -> SetupScreen(firstRun = !prefs.getBoolean("setupDone", false), onDone = {
+                            showSetup -> Readable { SetupScreen(firstRun = !prefs.getBoolean("setupDone", false), onDone = {
                                 prefs.edit().putBoolean("setupDone", true).apply()
                                 showSetup = false; tab = 0
-                            })
+                            }) }
                             downloadFor != null -> {
                                 val st = ModelStore.byId(downloadFor ?: "anima")
-                                DownloadScreen(
+                                Readable { DownloadScreen(
                                     store = st,
                                     current = installedOf[st.id],
                                     beforeSwap = { Engine.release() },
                                     onBack = { downloadFor = null; updating = false },
                                     update = updating,
-                                )
+                                ) }
                             }
-                            showQueue && open == null -> QueueScreen(onOpen = { open = it }, onBack = { showQueue = false })
+                            showQueue && open == null -> Readable { QueueScreen(onOpen = { open = it }, onBack = { showQueue = false }) }
                             open != null -> Detail(open!!, onBack = { open = null }, onUse = { e ->
                                 create.prompt = e.prompt; create.seed = e.seed; if (create.model == "anima") create.steps = e.steps
                                 sizeIndex(e.width, e.height)?.let { (t, k) -> create.tier = t; create.shape = k }
@@ -368,14 +392,37 @@ class MainActivity : ComponentActivity() {
                                     Engines.setMemoryMode(m)
                                 }
                             }
-                            tab == 1 -> ChatScreen(Chat.get(ctx), isInstalled = { installedOf[it] != null },
-                                onDownload = { downloadFor = LocalLing.store(ctx).id }, onOpen = { open = it }, onMenu = openMenu)
-                            tab == 3 -> Column { ChatBar(openMenu, "Settings"); SettingsScreen(onSetup = { showSetup = true }) }
-                            else -> Column { ChatBar(openMenu, "Gallery"); GalleryGrid(onOpen = { open = it }) }
+                            tab == 1 -> Box(Modifier.fillMaxSize()) { ChatScreen(Chat.get(ctx), isInstalled = { installedOf[it] != null },
+                                onDownload = { downloadFor = LocalLing.store(ctx).id }, onOpen = { open = it }, onMenu = openMenu) }
+                            tab == 3 -> Readable { Column { ChatBar(openMenu, "Settings"); SettingsScreen(onSetup = { showSetup = true }) } }
+                            else -> GalleryGrid(openMenu, onOpen = { open = it })
                         }
                     }
                 }
                 }
+                // wide (unfolded): a slim strip of the pages down the side, always there (the open menu, 232 dp, left the
+                // Create settings too cramped on a Fold's inner screen); narrow: the menu slides out from its button
+                if (wide) Row(Modifier.fillMaxSize()) {
+                    val qTick by Queue.store.changed.collectAsState()
+                    val waiting = remember(qTick) { Queue.store.waitingCount() }
+                    val here = downloadFor == null && open == null && !showQueue
+                    NavigationRail(Modifier.safeDrawingPadding()) {
+                        @Composable fun rail(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean,
+                                             badge: Int = 0, onClick: () -> Unit) =
+                            NavigationRailItem(selected = selected, onClick = onClick, label = { Text(label) },
+                                icon = { if (badge > 0) BadgedBox(badge = { Badge { Text("$badge") } }) { Icon(icon, label) } else Icon(icon, label) })
+                        Spacer(Modifier.height(8.dp))
+                        rail("Create", AppIcons.Create, here && tab == 0) { go(0) }
+                        rail("Chat", AppIcons.Chat, here && tab == 1) { go(1) }
+                        rail("Gallery", AppIcons.Gallery, here && tab == 2) { go(2) }
+                        rail("Queue", AppIcons.Queue, showQueue, badge = waiting) { go(0); showQueue = true }
+                        rail("Settings", AppIcons.Settings, here && tab == 3) { go(3) }
+                    }
+                    Box(Modifier.weight(1f)) { body() }
+                }
+                else ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = open == null, drawerContent = {
+                    ModalDrawerSheet(Modifier.safeDrawingPadding()) { menu() }
+                }) { body() }
             }
         }
     }
@@ -438,11 +485,11 @@ fun Create(
             if (s.edit == null) s.status = "Could not read that picture"
         }
     }
-    if (!Chip.supported) {
+    if (ModelStore.PICTURE.none { it.available }) {   // phones without the AI chip still get MOSS on the graphics chip
         DeviceNotSupported(Modifier.padding(16.dp))
         return
     }
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val controls: @Composable ColumnScope.() -> Unit = controls@{
         // One list of drawing models (2026-11-06: five models and Noct Q no longer fit as buttons in a row).
         // Noct Q is Qwen with other drawing files, copied over the cable into qwen/noctq/: listed when present.
         val choices = remember(installed) {
@@ -473,7 +520,7 @@ fun Create(
                 klein -> " It draws from plain sentences and can edit your pictures (about 4 GB)."
                 qwen -> " It draws 768×768 pictures from plain sentences and can edit your pictures (about 15 GB)."
                 fibo -> " It changes your pictures as you describe, at 768×768 (about 15 GB). It only edits."
-                moss -> " It draws 768×768 pictures from plain sentences in 8 steps (about 16 GB). It does not edit."
+                moss -> " It draws 768×768 pictures from plain sentences in 8 steps (about ${if (ModelStore.MOSS.onGraphicsChip) 11 else 16} GB). It does not edit."
                 wan -> " It turns one of your pictures into a short looping video that moves as you describe."
                 else -> ""
             })
@@ -483,7 +530,7 @@ fun Create(
                 Text("Downloading: ${task.status}", style = MaterialTheme.typography.bodySmall)
                 LinearProgressIndicator(progress = { task.fraction }, modifier = Modifier.fillMaxWidth())
             }
-            return@Column
+            return@controls
         }
         OutlinedTextField(s.prompt, { s.prompt = it }, Modifier.fillMaxWidth(),
             label = { Text(if (wan) "How the picture moves" else if (fibo || !anima && !moss && !qwenSmall && s.edit != null) "What to change" else "Prompt") }, minLines = 3, enabled = !s.busy)
@@ -518,7 +565,10 @@ fun Create(
             }
         }
         val (pw, ph) = if (big) 768 to 768 else pictureSize(if (klein) 0 else s.tier, s.shape)
-        Text("$pw×$ph · " + when { klein -> KLEIN_TIME; fibo -> FIBO_TIME; moss -> MOSS_TIME; wan -> WAN_TIME
+        Text("$pw×$ph · " + when { klein -> KLEIN_TIME
+            fibo -> if (GpuEngine.useForFibo(ctx)) FIBO_GPU_TIME else FIBO_TIME
+            moss -> if (GpuEngine.useForMoss(ctx)) MOSS_GPU_TIME else MOSS_TIME
+            wan -> wanTime(ctx)
             qwen -> if (s.qwenDrawing == "noctq") NOCTQ_TIME else QWEN_TIME; else -> SIZE_TIERS[s.tier].second },
             style = MaterialTheme.typography.bodySmall)
         if (qwenSmall) Text("Editing pictures needs the Standard Qwen download (Model: Change).", style = MaterialTheme.typography.bodySmall)
@@ -580,6 +630,8 @@ fun Create(
         }, enabled = myTask == null && s.prompt.isNotBlank() && installed && !fiboNeedsPicture, modifier = Modifier.fillMaxWidth()) {
             Text(if (myTask != null) "Add to queue (after the update)" else "Add to queue")
         }
+    }
+    val result: @Composable ColumnScope.() -> Unit = {
         // the newest finished picture from this screen, and how the queue is doing
         val tick by Queue.store.changed.collectAsState()
         val progress by QueueService.progress.collectAsState()
@@ -629,31 +681,94 @@ fun Create(
                 }, enabled = !s.busy && !Installer.isRunning("anima")) { Text("Upscale 4×") }
             }
         }
+    }
+    if (isWide()) Row(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            controls(); Spacer(Modifier.height(24.dp))
+        }
+        Column(Modifier.weight(1.15f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (installed) result()
+            if (s.picture == null) Text("The finished picture shows here.", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(24.dp))
+        }
+    } else Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        controls()
+        if (installed) result()
         Spacer(Modifier.height(24.dp))
     }
 }
 
+/**
+ * The saved pictures. Press and hold one to start choosing (2026-11-18): taps then tick and untick pictures, the bar
+ * shows how many are chosen with "choose all" and delete, and Back or the cross stops choosing.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun GalleryGrid(onOpen: (Gallery.Entry) -> Unit) {
+fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf<List<Gallery.Entry>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
+    var chosen by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var choosing by remember { mutableStateOf(false) }
+    var asking by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         items = withContext(Dispatchers.IO) { Gallery.list(ctx) }
         loaded = true
     }
-    if (loaded && items.isEmpty()) {
-        Text("No saved pictures yet.", Modifier.padding(16.dp))
-        return
-    }
-    LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize().padding(4.dp)) {
-        items(items, key = { it.uri.toString() }) { e ->
-            // each preview is made when its square comes into view, and kept for next time
-            val thumb by produceState(Gallery.cachedThumbnail(e, 384), e.uri) {
-                if (value == null) value = withContext(Dispatchers.IO) { Gallery.thumbnail(ctx, e, 384) }
-            }
-            Box(Modifier.padding(2.dp).aspectRatio(1f).clickable { onOpen(e) }) {
-                thumb?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+    fun stop() { choosing = false; chosen = emptySet() }
+    BackHandler(enabled = choosing) { stop() }
+    val scheme = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxSize()) {
+        if (choosing) Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { stop() }) { Icon(AppIcons.Close, "Stop choosing") }
+            Text(if (chosen.isEmpty()) "Choose pictures" else "${chosen.size} chosen", Modifier.weight(1f).padding(start = 8.dp),
+                fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            IconButton(onClick = {
+                chosen = if (chosen.size == items.size) emptySet() else items.map { it.uri.toString() }.toSet()
+            }) { Icon(AppIcons.SelectAll, if (chosen.size == items.size) "Choose none" else "Choose all") }
+            IconButton(onClick = { asking = true }, enabled = chosen.isNotEmpty()) { Icon(AppIcons.Delete, "Delete chosen") }
+        } else ChatBar(openMenu, "Gallery", buttons = 1) {
+            IconButton(onClick = { choosing = true }, enabled = items.isNotEmpty()) { Icon(AppIcons.SelectAll, "Choose pictures") }
+        }
+        if (asking) AlertDialog(onDismissRequest = { asking = false },
+            title = { Text(if (chosen.size == 1) "Delete this picture?" else "Delete ${chosen.size} pictures?") },
+            text = { Text("They are removed from the phone, not only from this list.") },
+            confirmButton = { TextButton(onClick = {
+                asking = false
+                val gone = items.filter { it.uri.toString() in chosen }
+                scope.launch {
+                    withContext(Dispatchers.IO) { Gallery.deleteMany(ctx, gone) }
+                    items = items - gone.toSet()
+                    stop()
+                }
+            }) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { asking = false }) { Text("Cancel") } })
+        if (loaded && items.isEmpty()) {
+            Text("No saved pictures yet.", Modifier.padding(16.dp))
+            return@Column
+        }
+        LazyVerticalGrid(if (isWide()) GridCells.Adaptive(170.dp) else GridCells.Fixed(3), Modifier.fillMaxSize().padding(4.dp)) {
+            items(items, key = { it.uri.toString() }) { e ->
+                // each preview is made when its square comes into view, and kept for next time
+                val thumb by produceState(Gallery.cachedThumbnail(e, 384), e.uri) {
+                    if (value == null) value = withContext(Dispatchers.IO) { Gallery.thumbnail(ctx, e, 384) }
+                }
+                val key = e.uri.toString()
+                val on = key in chosen
+                fun toggle() { chosen = if (on) chosen - key else chosen + key }
+                Box(Modifier.padding(2.dp).aspectRatio(1f).combinedClickable(
+                    onClick = { if (choosing) toggle() else onOpen(e) },
+                    onLongClick = { if (!choosing) { choosing = true; chosen = setOf(key) } else toggle() })) {
+                    thumb?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize().padding(if (on) 10.dp else 0.dp)
+                        .clip(RoundedCornerShape(if (on) 10.dp else 0.dp)), contentScale = ContentScale.Crop) }
+                    if (choosing) Box(Modifier.align(Alignment.TopStart).padding(6.dp).size(24.dp).clip(CircleShape)
+                        .background(if (on) scheme.surface else Color.Black.copy(alpha = 0.25f))) {
+                        if (on) Icon(AppIcons.CheckCircle, null, Modifier.fillMaxSize(), tint = scheme.primary)
+                        else Box(Modifier.fillMaxSize().border(2.dp, Color.White, CircleShape))
+                    }
+                }
             }
         }
     }
@@ -670,15 +785,26 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
     var note by remember(e0) { mutableStateOf("") }
     var upscaling by remember(e0) { mutableStateOf(false) }
     LaunchedEffect(e) { bmp = withContext(Dispatchers.IO) { gif = Gallery.isClip(ctx, e); Gallery.full(ctx, e) } }
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        TextButton(onClick = onBack) { Text("‹ Back") }
+    val picture: @Composable () -> Unit = {
         bmp?.let {
             if (gif) GifPlayer(e.uri, Modifier.fillMaxWidth().aspectRatio(it.width.toFloat() / it.height))
             else Image(it.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(it.width.toFloat() / it.height))
         }
+    }
+    val wide = isWide()
+    Row(Modifier.fillMaxSize()) {
+    if (wide) Column(Modifier.weight(1.3f).verticalScroll(rememberScrollState()).padding(16.dp)) {
+        TextButton(onClick = onBack) { Text("‹ Back") }
+        picture()
+    }
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (!wide) { TextButton(onClick = onBack) { Text("‹ Back") }; picture() } else Spacer(Modifier.height(40.dp))
         Text(e.prompt)
         Text("seed ${e.seed} · ${e.steps} steps · ${e.width}×${e.height}", style = MaterialTheme.typography.bodySmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // wraps onto a second line when the column is too narrow for all three (the unfolded side panel)
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Button(onClick = { onUse(e) }) { Text("Use this prompt") }
             OutlinedButton(onClick = {
                 val send = Intent(Intent.ACTION_SEND).setType(Gallery.mime(ctx, e)).putExtra(Intent.EXTRA_STREAM, e.uri)
@@ -690,7 +816,8 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
         }
         // 4x bigger, in place of this picture. Up to 1024 on the long side: 4x of more would not fit in memory.
         val b = bmp
-        if (!gif && b != null && maxOf(b.width, b.height) <= 1024) {
+        // the upscaler runs on the AI chip: phones without one never get it, so no button that can only say "download Anima"
+        if (Chip.supported && !gif && b != null && maxOf(b.width, b.height) <= 1024) {
             OutlinedButton(onClick = {
                 upscaling = true
                 note = if (QueueService.progress.value.first.isNotEmpty()) "Upscaling after the picture being drawn…" else "Upscaling…"
@@ -719,5 +846,6 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
             if (!AppIcon.pinPicture(ctx, b2, e.seed.toString() + "-" + e.uri.lastPathSegment))
                 android.widget.Toast.makeText(ctx, "This launcher cannot add shortcuts", android.widget.Toast.LENGTH_SHORT).show()
         }, enabled = bmp != null) { Text("Add to home screen as an icon") }
+    }
     }
 }

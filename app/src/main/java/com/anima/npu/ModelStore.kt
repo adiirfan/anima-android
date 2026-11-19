@@ -22,14 +22,18 @@ class ModelStore(
     private val eliteUrl: String,   // the file list for Snapdragon 8 Elite (Hexagon v79)
     private val gen5Url: String?,   // the same for 8 Elite Gen 5 (Hexagon v81); null when not built for it yet
     private val sub: String,  // folder under files/models ("" for Anima, which predates the others)
+    private val gpuUrl: String? = null,   // a graphics-chip build for phones without a supported AI chip, if any
 ) {
     /** Where this phone's file list is, or null when the model has no build for its chip. */
     val manifestUrl: String?
         get() = when (Chip.kind) {
             Chip.Kind.ELITE -> eliteUrl
             Chip.Kind.ELITE_GEN5 -> gen5Url
-            Chip.Kind.UNSUPPORTED -> null
+            Chip.Kind.UNSUPPORTED -> gpuUrl
         }
+
+    /** This phone gets the graphics-chip build (no AI chip the app supports). */
+    val onGraphicsChip get() = Chip.kind == Chip.Kind.UNSUPPORTED && gpuUrl != null
 
     /** Whether this phone can download and run the model. */
     val available get() = manifestUrl != null
@@ -50,15 +54,17 @@ class ModelStore(
         val QWEN = ModelStore(
             "qwen", "Qwen-Image 2.1",
             "Qwen-Image 2.1 is released under the Qwen Research License: non-commercial use only. Built with Qwen.",
-            "$HF/qwen-image-2.1-qnn-8elite/resolve/main/manifest.json", null, "qwen/")
+            "$HF/qwen-image-2.1-qnn-8elite/resolve/main/manifest.json", "$HF/qwen-image-2.1-qnn-8elite-gen5/resolve/main/manifest.json", "qwen/")
         val FIBO = ModelStore(
             "fibo", "Fibo 2.0 edit",
             "Fibo 2.0 is released by Bria under CC BY-NC 4.0: non-commercial use only.",
-            "$HF/fibo-qnn-8elite/resolve/main/manifest.json", "$HF/fibo-qnn-8elite-gen5/resolve/main/manifest.json", "fibo/")
+            "$HF/fibo-qnn-8elite/resolve/main/manifest.json", "$HF/fibo-qnn-8elite-gen5/resolve/main/manifest.json", "fibo/",
+            "$HF/fibo-gpu/resolve/main/manifest.json")
         val MOSS = ModelStore(
             "moss", "MOSS-Image",
             "MOSS-Image and its 8-step add-on are released under the Apache 2.0 licence.",
-            "$HF/moss-qnn-8elite/resolve/main/manifest.json", "$HF/moss-qnn-8elite-gen5/resolve/main/manifest.json", "moss/")
+            "$HF/moss-qnn-8elite/resolve/main/manifest.json", "$HF/moss-qnn-8elite-gen5/resolve/main/manifest.json", "moss/",
+            "$HF/moss-gpu/resolve/main/manifest.json")
         val WAN = ModelStore(
             "wan", "Wan 2.2 clips",
             "Wan 2.2 (Alibaba), its LightTAE decoder and the umT5 prompt reader are released under the Apache 2.0 " +

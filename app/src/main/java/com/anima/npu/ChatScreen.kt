@@ -16,6 +16,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -50,6 +52,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -71,6 +74,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -116,16 +120,38 @@ fun ChatScreen(chat: ChatController, isInstalled: (String) -> Boolean, onDownloa
     val prefs = remember { ctx.getSharedPreferences("anima", Context.MODE_PRIVATE) }
     var convId by remember { mutableStateOf(prefs.getString("chatConv", null)) }
     var showList by remember { mutableStateOf(false) }
-    var newThinking by remember { mutableStateOf(false) }
     val tick by chat.changed.collectAsState()
     val turn by chat.state.collectAsState()
     val conv = remember(tick, convId) { convId?.let { chat.store().get(it) } }
     fun open(id: String?) { convId = id; prefs.edit().putString("chatConv", id).apply() }
 
-    if (showList) {
+    val wide = isWide()
+    if (showList && !wide) {
         ChatList(chat, current = convId, onOpen = { open(it); showList = false }, onBack = { showList = false })
         return
     }
+    // unfolded: the menu at the side, the chats in the middle, the conversation on the right
+    if (wide) {
+        Row(Modifier.fillMaxSize()) {
+            Box(Modifier.width(300.dp).fillMaxHeight()) {
+                ChatList(chat, current = convId, onOpen = { open(it) }, onBack = null)
+            }
+            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+                Box(Modifier.widthIn(max = 900.dp).fillMaxSize()) { Conversation(chat, convId, conv, turn, slots, { slots = it }, ::open, onOpen, onMenu, wide) }
+            }
+        }
+        return
+    }
+    Conversation(chat, convId, conv, turn, slots, { slots = it }, ::open, onOpen, onMenu, wide, onList = { showList = true })
+}
+
+/** One conversation: the bar, the messages, and the composer. */
+@Composable
+private fun Conversation(chat: ChatController, convId: String?, conv: Conversation?, turn: TurnState, slots: Int, setSlots: (Int) -> Unit, open: (String?) -> Unit,
+                         onOpen: (Gallery.Entry) -> Unit, onMenu: () -> Unit, wide: Boolean, onList: (() -> Unit)? = null) {
+    val ctx = LocalContext.current
+    var newThinking by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf("") }
     var attached by remember { mutableStateOf<Bitmap?>(null) }
     var renaming by remember { mutableStateOf(false) }
@@ -148,8 +174,8 @@ fun ChatScreen(chat: ChatController, isInstalled: (String) -> Boolean, onDownloa
     }
 
     Column(Modifier.fillMaxSize().imePadding()) {
-        ChatBar(onMenu, conv?.title ?: "New chat", if (mine) status else modelLabel(ctx, slots), buttons = 2) {
-            IconButton(onClick = { showList = true }) { Icon(AppIcons.Chats, "Chats") }
+        ChatBar(onMenu, conv?.title ?: "New chat", if (mine) status else modelLabel(ctx, slots), buttons = if (wide) 1 else 2) {
+            if (onList != null) IconButton(onClick = onList) { Icon(AppIcons.Chats, "Chats") }
             var menu by remember { mutableStateOf(false) }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(AppIcons.More, "More") }
@@ -184,12 +210,15 @@ fun ChatScreen(chat: ChatController, isInstalled: (String) -> Boolean, onDownloa
                 Text("Ask for a picture, like \"draw an anime girl in the rain\", then say \"edit it\" to change it.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, reverseLayout = true,
+        } else BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+          val bubble = (maxWidth - 32.dp) * (if (wide) 0.86f else 0.9f)
+          LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Bottom)) {
-            if (live) item { Reply(turn.partialText, turn.partialThinking, actions = false) }
+            if (live) item { Reply(turn.partialText, turn.partialThinking, actions = false, bubble) }
             else if (mine) item { StatusLine(status) }
-            items(msgs.asReversed(), key = { it.id }) { m -> MessageRow(m, chat.store().dir(), onOpen) }
+            items(msgs.asReversed(), key = { it.id }) { m -> MessageRow(m, chat.store().dir(), onOpen, bubble) }
+          }
         }
 
         // the picture going with the next message
@@ -223,7 +252,7 @@ fun ChatScreen(chat: ChatController, isInstalled: (String) -> Boolean, onDownloa
                     if (conv != null) chat.setThinking(conv.id, !thinking) else newThinking = !thinking
                 }
                 Spacer(Modifier.width(4.dp))
-                ModelPill(slots, enabled = !busy) { n -> slots = n; LocalLing.setExpertSlots(ctx, n) }
+                ModelPill(slots, enabled = !busy) { n -> setSlots(n); LocalLing.setExpertSlots(ctx, n) }
                 Spacer(Modifier.weight(1f))
                 if (mine) FilledTonalIconButton(onClick = { chat.stop() }, Modifier.size(40.dp)) {
                     Icon(AppIcons.Stop, "Stop", Modifier.size(20.dp))
@@ -243,7 +272,8 @@ fun ChatScreen(chat: ChatController, isInstalled: (String) -> Boolean, onDownloa
 fun ChatBar(onMenu: () -> Unit, title: String, subtitle: String = "", buttons: Int = 0,
             actions: (@Composable () -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onMenu) { Icon(AppIcons.Menu, "Menu") }
+        // wide screens keep the menu open at the side: no menu button, the same space keeps the title centred
+        if (isWide()) Spacer(Modifier.width(48.dp)) else IconButton(onClick = onMenu) { Icon(AppIcons.Menu, "Menu") }
         // as wide on the left as the page's buttons on the right, so the title sits in the middle
         if (buttons > 1) Spacer(Modifier.width((48 * (buttons - 1)).dp))
         Column(Modifier.weight(1f).padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -314,7 +344,7 @@ private fun copy(ctx: Context, text: String) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageRow(m: Msg, dir: File, onOpen: (Gallery.Entry) -> Unit) {
+private fun MessageRow(m: Msg, dir: File, onOpen: (Gallery.Entry) -> Unit, bubble: Dp) {
     val ctx = LocalContext.current
     val scheme = MaterialTheme.colorScheme
     when (m) {
@@ -326,14 +356,13 @@ private fun MessageRow(m: Msg, dir: File, onOpen: (Gallery.Entry) -> Unit) {
                 b?.let { Image(it.asImageBitmap(), null, Modifier.padding(bottom = 6.dp).size(140.dp).clip(RoundedCornerShape(14.dp)),
                     contentScale = ContentScale.Crop) }
             }
-            if (m.text.isNotBlank()) Text(m.text,
-                Modifier.widthIn(max = (LocalConfiguration.current.screenWidthDp * 0.82f).dp)
-                    .clip(RoundedCornerShape(18.dp)).background(scheme.surfaceContainerHighest)
+            if (m.text.isNotBlank()) RichText(m.text, scheme.onPrimaryContainer,
+                modifier = Modifier.widthIn(max = bubble)
+                    .clip(RoundedCornerShape(16.dp)).background(scheme.primaryContainer)
                     .combinedClickable(onClick = {}, onLongClick = { copy(ctx, m.text) })
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                fontSize = 15.sp, lineHeight = 21.sp)
+                    .padding(horizontal = 14.dp, vertical = 10.dp))
         }
-        is Msg.Assistant -> Reply(m.text, m.thinking, actions = true)
+        is Msg.Assistant -> Reply(m.text, m.thinking, actions = true, bubble)
         is Msg.ToolCall -> {
             val a = runCatching { org.json.JSONObject(m.argsJson) }.getOrNull()
             val edit = a?.optBoolean("edit") == true
@@ -353,9 +382,9 @@ private fun MessageRow(m: Msg, dir: File, onOpen: (Gallery.Entry) -> Unit) {
     }
 }
 
-/** A reply: plain text across the page (selectable), its thinking folded above, a copy button under it. */
+/** A reply: formatted text in a bubble (selectable), its thinking folded above, a copy button under it. */
 @Composable
-private fun Reply(text: String, thinking: String, actions: Boolean) {
+private fun Reply(text: String, thinking: String, actions: Boolean, bubble: Dp) {
     val ctx = LocalContext.current
     var open by remember { mutableStateOf(false) }
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
@@ -366,7 +395,11 @@ private fun Reply(text: String, thinking: String, actions: Boolean) {
             if (open) Text(thinking, Modifier.padding(start = 10.dp, bottom = 6.dp), fontSize = 13.sp, lineHeight = 18.sp, color = muted)
         }
         if (text.isNotBlank()) {
-            SelectionContainer { Text(text, fontSize = 15.sp, lineHeight = 21.sp) }
+            SelectionContainer {
+                RichText(text, MaterialTheme.colorScheme.onSurface, modifier = Modifier.widthIn(max = bubble)
+                    .clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .padding(horizontal = 14.dp, vertical = 10.dp))
+            }
             if (actions) IconButton(onClick = { copy(ctx, text) }, Modifier.size(32.dp)) {
                 Icon(AppIcons.Copy, "Copy", Modifier.size(17.dp), tint = muted)
             }
@@ -427,14 +460,15 @@ private fun PictureCard(jobId: String, onOpen: (Gallery.Entry) -> Unit) {
 }
 
 @Composable
-private fun ChatList(chat: ChatController, current: String?, onOpen: (String?) -> Unit, onBack: () -> Unit) {
+private fun ChatList(chat: ChatController, current: String?, onOpen: (String?) -> Unit, onBack: (() -> Unit)?) {
     val tick by chat.changed.collectAsState()
     val all = remember(tick) { chat.store().list() }
     val fmt = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT) }
     val scheme = MaterialTheme.colorScheme
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(AppIcons.Back, "Back") }
+            if (onBack != null) IconButton(onClick = onBack) { Icon(AppIcons.Back, "Back") }
+            else Spacer(Modifier.width(16.dp))
             Text("Chats", Modifier.weight(1f), fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             IconButton(onClick = { onOpen(null) }, enabled = !chat.busy()) { Icon(AppIcons.Add, "New chat") }
         }

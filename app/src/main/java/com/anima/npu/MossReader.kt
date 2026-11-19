@@ -26,10 +26,10 @@ object MossReader {
     private fun text(prompt: String) = "<|im_start|>user\n${prompt.trim()}<|im_end|>\n<|im_start|>assistant\n<think>\n"
 
     /** (prompt rows, empty-prompt rows), each rows x 4096. [say] gets progress lines for the screen. */
-    fun read(ctx: Context, dir: File, prompt: String, say: (String) -> Unit = {}): Pair<FloatArray, FloatArray> {
+    fun read(ctx: Context, dir: File, prompt: String, say: (String) -> Unit = {}, aiChip: Boolean = true): Pair<FloatArray, FloatArray> {
         val cache = File(dir, "empty_rows.f32")
         var empty = runCatching { load(cache) }.getOrNull()
-        val p = start(ctx, File(dir, FILE), say)
+        val p = start(ctx, File(dir, FILE), say, aiChip)
         try {
             say("Reading the prompt…")
             val cond = embed(text(prompt))
@@ -42,7 +42,7 @@ object MossReader {
         }
     }
 
-    private fun start(ctx: Context, model: File, say: (String) -> Unit): Process {
+    private fun start(ctx: Context, model: File, say: (String) -> Unit, aiChip: Boolean): Process {
         if (!model.isFile) error("MOSS reader missing: ${model.path}")
         LocalLing.stop()   // the chat model's memory first: this reader is 4.8 GB
         val libs = ctx.applicationInfo.nativeLibraryDir
@@ -50,7 +50,7 @@ object MossReader {
             "$libs/libllama-server.so", "-m", model.absolutePath, "--embeddings", "--pooling", "none",
             // the AI chip (without it llama.cpp picks the graphics chip, which fails): iQOO 13, loads in ~12 s,
             // reads a prompt in 0.4 s; phone memory peaks at 7.5 GB while drawing (2026-11-06)
-            "--device", "HTP0", "-ngl", "99",
+        ) + (if (aiChip) listOf("--device", "HTP0", "-ngl", "99") else listOf("--device", "none", "-ngl", "0")) + listOf(
             "-c", "1024", "-np", "1", "-b", "512", "-ub", "512",
             "--host", "127.0.0.1", "--port", PORT.toString(), "--no-webui",
         )
