@@ -91,7 +91,11 @@ object Gallery {
         val r = ctx.contentResolver
         val uri = r.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: error("could not create the clip file")
         try {
-            r.openFileDescriptor(uri, "rw")!!.use { VideoWriter.write(it.fileDescriptor, frames, w, h) }
+            r.openFileDescriptor(uri, "rw")!!.use {
+                // long clips (3 s, 49 frames) play once at 16 per second as made; short ones keep the old back-and-forth loop
+                if (frames.size >= 33) VideoWriter.write(it.fileDescriptor, frames, w, h, fps = 16, loops = 1, pingPong = false)
+                else VideoWriter.write(it.fileDescriptor, frames, w, h)
+            }
         } catch (t: Throwable) {
             runCatching { r.delete(uri, null, null) }; throw t
         }
@@ -144,6 +148,13 @@ object Gallery {
     fun delete(ctx: Context, e: Entry) {
         runCatching { ctx.contentResolver.delete(e.uri, null, null) }
         write(ctx, read(ctx).filter { it.uri != e.uri })
+    }
+
+    /** Several pictures at once, with the list rewritten once rather than once per picture. */
+    fun deleteMany(ctx: Context, es: Collection<Entry>) {
+        es.forEach { e -> runCatching { ctx.contentResolver.delete(e.uri, null, null) } }
+        val gone = es.map { it.uri }.toSet()
+        write(ctx, read(ctx).filter { it.uri !in gone })
     }
 
     // Small previews already made, so reopening the gallery shows them at once (about 48 MB at most).

@@ -37,8 +37,11 @@ public:
     void release();
 
 private:
-    static constexpr int S = 768, LH = 48, C = 48, F = 5, PH = 24, D = 3072, T = 512, TXT = 4096, NB = 30;
-    static constexpr int N0 = PH * PH, L = F * N0, OUTF = 17;
+    static constexpr int S = 768, LH = 48, C = 48, PH = 24, D = 3072, T = 512, TXT = 4096, NB = 30;
+    static constexpr int N0 = PH * PH;
+    // clip length, from frames.txt in the model folder (default 17 = about 1 s; 49 = 3 s at 16 per second). The
+    // blocks, emb.bin and head.bin are built for one length; enc/prep/time/dec work for any.
+    int OUTF = 17, F = 5, L = 5 * N0;
     Shm& buf(const std::string& key, size_t bytes, std::string* err);
     bool bindAll(QnnCtx& c, std::string* err);
     bool runFile(const std::string& name, std::string* err);

@@ -147,20 +147,24 @@ bool Wan::init(const std::string& dir, const std::string& libDir, std::string* e
     if (!g_rpc.open()) { *err = "libcdsprpc.so not available"; return false; }
     for (const char* f : {"enc.bin", "prep.bin", "time.bin", "emb.bin", "w0.bin", "w29.bin", "head.bin", "dec.bin", "sigmas.txt"})
         if (access((dir + "/" + f).c_str(), R_OK) != 0) { *err = std::string("Wan file missing: ") + f; return false; }
-    LOGI("Wan 2.2 ready");
+    if (FILE* f = fopen((dir + "/frames.txt").c_str(), "r")) {
+        int fr = 0;
+        if (fscanf(f, "%d", &fr) == 1 && fr >= 5 && (fr - 1) % 4 == 0) OUTF = fr;
+        fclose(f);
+    }
+    F = (OUTF - 1) / 4 + 1; L = F * N0;
+    LOGI("Wan 2.2 ready, %d frames (%d latent, %d rows)", OUTF, F, L);
     ready_ = true;
     return true;
 }
 
 bool Wan::generate(const float* rows, int n, const uint8_t* rgb, uint64_t seed, WanResult* r, std::string* err,
                    const std::function<void(int, int)>& progress) {
-    std::vector<double> sig;
-    if (FILE* f = fopen((dir_ + "/sigmas.txt").c_str(), "r")) {
-        double v;
-        while (fscanf(f, "%lf", &v) == 1) if (v > 0 && v <= 1) sig.push_back(v);
-        fclose(f);
-    }
-    if (sig.empty()) { *err = "no noise levels in sigmas.txt"; return false; }
+    // The Turbo model is a 4-step distill trained on these noise levels (timesteps 1000/750/500/250, shift 5). Each
+    // step predicts the clean clip and re-noises it with fresh noise to the next level. The old schedule from
+    // sigmas.txt (8 levels, plain flow steps) left blocky, smeared patches (2026-11-18); the file is still shipped but
+    // no longer read.
+    std::vector<double> sig = {1.0, 0.9375, 0.833333, 0.625};
     const int STEPS = (int)sig.size();
     sig.push_back(0);
     if (n < 1 || n > T) { *err = "prompt too long (more than 512 words)"; return false; }
@@ -284,9 +288,10 @@ bool Wan::generate(const float* rows, int n, const uint8_t* rgb, uint64_t seed, 
         for (int k = 0; k < NB; k++) if (loads[k].valid()) loads[k].wait();
         if (!ok) return false;
         if (!runFile("head.bin", err)) return false;
-        // velocity rows (dy, dx, channel) -> one flow step; the start frame stays the clean picture
+        // velocity rows (dy, dx, channel) -> the predicted clean clip x0 = z - s v, re-noised to the next level
+        // with fresh noise (none after the last step); the start frame stays the clean picture
         auto* v = (const _Float16*)bufs_["vel"].p;
-        const float dt = (float)(sig[i + 1] - sig[i]);
+        const float s0 = (float)sig[i], s1 = (float)sig[i + 1];
         if (i == 0) wanDump(dir_, "vel0.f16", v, bufs_["vel"].bytes);
         for (int f = 1; f < F; f++)
             for (int py = 0; py < PH; py++)
@@ -295,7 +300,11 @@ bool Wan::generate(const float* rows, int n, const uint8_t* rgb, uint64_t seed, 
                     for (int dy = 0; dy < 2; dy++)
                         for (int dx = 0; dx < 2; dx++)
                             for (int ch = 0; ch < C; ch++)
-                                z[zat(ch, f) + (size_t)(2 * py + dy) * LH + 2 * px + dx] += dt * (float)v[rr * C * 4 + (dy * 2 + dx) * C + ch];
+                            {
+                                float& zz = z[zat(ch, f) + (size_t)(2 * py + dy) * LH + 2 * px + dx];
+                                const float x0 = zz - s0 * (float)v[rr * C * 4 + (dy * 2 + dx) * C + ch];
+                                zz = s1 > 0 ? (1 - s1) * x0 + s1 * nd(rng) : x0;
+                            }
                 }
         LOGI("step %d of %d done", i + 1, STEPS);
     }
