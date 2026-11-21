@@ -46,6 +46,17 @@ object GpuEngine {
         return d
     }
 
+    /**
+     * Reading a model's blocks from storage as they are needed keeps the graphics chip's memory small whatever the
+     * model's size, for a slower step: every block is copied to the chip again each step. Models that only fit that
+     * way always do it; Klein and Anima do it on phones with less than [gb] GB of memory and stay loaded on bigger ones.
+     */
+    private fun streamBelow(ctx: Context, gb: Int): Map<String, String> {
+        val mi = android.app.ActivityManager.MemoryInfo()
+        (ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mi)
+        return if (mi.totalMem < gb * 1024L * 1024 * 1024) mapOf("STREAM" to "1") else emptyMap()
+    }
+
     /** Runs the engine once; [line] sees every line it prints. Throws with its last lines when it fails. */
     private fun run(ctx: Context, args: List<String>, env: Map<String, String>, line: (String) -> Unit = {}) =
         runProgram(ctx, LIB, args, env, line)
@@ -245,7 +256,7 @@ object GpuEngine {
         val step = Regex("^draw step (\\d+):")
         run(ctx, listOf(File(wdir, "anima_q8.gguf").absolutePath, work.absolutePath, "0", "${width}x$height"),
             mapOf("DRAW" to "$steps", "CEN" to File(wdir, "anima_q8.cen").absolutePath,
-                "TUNEFILE" to File(home, "anima.tune").absolutePath)) { l ->
+                "TUNEFILE" to File(home, "anima.tune").absolutePath) + streamBelow(ctx, 10)) { l ->
             step.find(l)?.let { progress.onStep(it.groupValues[1].toInt() + 1, steps) }
         }
         // patches -> (2hp, 2wp, 16), channels innermost, for the small decoder
@@ -351,7 +362,7 @@ object GpuEngine {
         // 4. the drawing, then the small decoder
         val step = Regex("^draw step (\\d+):")
         run(ctx, listOf(File(wdir, "klein_q8.gguf").absolutePath, work.absolutePath),
-            mapOf("DRAW" to "1", "TUNEFILE" to File(home, "klein.tune").absolutePath)) { l ->
+            mapOf("DRAW" to "1", "TUNEFILE" to File(home, "klein.tune").absolutePath) + streamBelow(ctx, 14)) { l ->
             step.find(l)?.let { progress.onStep(it.groupValues[1].toInt() + 1, steps) }
         }
         val out = decodeFlux2(ctx, File(work, "draw.f32"), h, w, wdir)

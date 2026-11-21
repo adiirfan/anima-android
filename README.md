@@ -28,6 +28,7 @@ the chip they were built for, so the app picks the repos by chip. On the Snapdra
 [wan22-qnn-8elite](https://huggingface.co/sebekblessing/wan22-qnn-8elite).
 On the 8 Elite Gen 5 it uses
 [anima-qnn-8elite-gen5](https://huggingface.co/sebekblessing/anima-qnn-8elite-gen5),
+[qwen-image-2.1-qnn-8elite-gen5](https://huggingface.co/sebekblessing/qwen-image-2.1-qnn-8elite-gen5),
 [fibo-qnn-8elite-gen5](https://huggingface.co/sebekblessing/fibo-qnn-8elite-gen5),
 [moss-qnn-8elite-gen5](https://huggingface.co/sebekblessing/moss-qnn-8elite-gen5),
 [wan22-qnn-8elite-gen5](https://huggingface.co/sebekblessing/wan22-qnn-8elite-gen5) and
