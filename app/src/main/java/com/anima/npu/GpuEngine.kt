@@ -51,10 +51,14 @@ object GpuEngine {
      * model's size, for a slower step: every block is copied to the chip again each step. Models that only fit that
      * way always do it; Klein and Anima do it on phones with less than [gb] GB of memory and stay loaded on bigger ones.
      */
-    private fun streamBelow(ctx: Context, gb: Int): Map<String, String> {
+    private fun streamBelow(ctx: Context, gb: Int): Map<String, String> =
+        if (lowMemory(ctx, gb)) mapOf("STREAM" to "1") else emptyMap()
+
+    /** This phone has less than [gb] GB of memory in all. */
+    fun lowMemory(ctx: Context, gb: Int): Boolean {
         val mi = android.app.ActivityManager.MemoryInfo()
         (ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mi)
-        return if (mi.totalMem < gb * 1024L * 1024 * 1024) mapOf("STREAM" to "1") else emptyMap()
+        return mi.totalMem < gb * 1024L * 1024 * 1024
     }
 
     /** Runs the engine once; [line] sees every line it prints. Throws with its last lines when it fails. */
@@ -68,6 +72,9 @@ object GpuEngine {
         val pb = ProcessBuilder(listOf(File(libs, lib).absolutePath) + args).directory(home).redirectErrorStream(true)
         pb.environment()["LD_LIBRARY_PATH"] = "$libs:/system/lib64:/vendor/lib64:/system/vendor/lib64"
         pb.environment()["KCACHE"] = File(home, "kcache").absolutePath   // built chip programs kept between runs
+        // the prompt readers on phones with less than 14 GB: no private copy of the reader's weights (4 to 5 GB for
+        // the big readers), they are used straight from the file instead; slower on a long prompt
+        if (lowMemory(ctx, 14)) pb.environment()["READER_NOCOPY"] = "1"
         pb.environment().putAll(env)
         val proc = pb.start()
         val last = ArrayDeque<String>()

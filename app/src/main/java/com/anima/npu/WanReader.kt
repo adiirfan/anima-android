@@ -43,6 +43,9 @@ object WanReader {
             "--device", "none", "-ngl", "0", "-t", "6",
             "-c", "512", "-np", "1", "-b", "512", "-ub", "512",
             "--host", "127.0.0.1", "--port", PORT.toString(), "--no-webui",
+            // no private rearranged copy of the reader's weights (3.7 GB of memory): they are used straight from the
+            // file, which also loads and reads a prompt faster here
+            "--no-repack",
         )
         val pb = ProcessBuilder(cmd)
         pb.environment()["LD_LIBRARY_PATH"] = "$libs:/system/lib64:/vendor/lib64:/system/vendor/lib64"

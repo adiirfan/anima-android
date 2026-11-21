@@ -53,7 +53,8 @@ object MossReader {
         ) + (if (aiChip) listOf("--device", "HTP0", "-ngl", "99") else listOf("--device", "none", "-ngl", "0")) + listOf(
             "-c", "1024", "-np", "1", "-b", "512", "-ub", "512",
             "--host", "127.0.0.1", "--port", PORT.toString(), "--no-webui",
-        )
+            // on the processor, phones with less than 14 GB: no private copy of the reader's weights (4.8 GB)
+        ) + (if (!aiChip && GpuEngine.lowMemory(ctx, 14)) listOf("--no-repack") else emptyList())
         val pb = ProcessBuilder(cmd)
         pb.environment()["LD_LIBRARY_PATH"] = "$libs:/system/lib64:/vendor/lib64:/system/vendor/lib64"
         pb.environment()["ADSP_LIBRARY_PATH"] = libs
