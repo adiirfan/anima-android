@@ -3,7 +3,8 @@
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
 // Y = relu?(conv_k(X') + B + R), X' = X doubled in size first when up = 1 (nearest), padding k / 2;
-// up = -1: stride 2 (the input is twice the output's size, as the encoders' shrinking filters).
+// up = -1: stride 2 (the input is twice the output's size, as the encoders' shrinking filters); up = -2: stride 2
+// padded only right / bottom (Wan's VAE: output pixel y reads input rows 2y .. 2y + K - 1).
 // One work item: 4 output channels of PX pixels side by side in one row.
 #ifndef PX
 #define PX 4
@@ -12,7 +13,7 @@ __kernel void conv(__global const half *X, __global const half *Wt, __global con
                    __global half *Y, int H, int W, int Ci, int Co, int K, int up, int relu, int hasB, int hasR) {
     const int c4 = get_global_id(0), x0 = get_global_id(1) * PX, y = get_global_id(2);
     if (c4 * 4 >= Co || x0 >= W || y >= H) return;
-    const int dn = up < 0, u = up > 0, p = K / 2, Wi = dn ? 2 * W : W >> u, Hin = dn ? 2 * H : H, Win = dn ? 2 * W : W;
+    const int dn = up < 0, u = up > 0, p = up == -2 ? 0 : K / 2, Wi = dn ? 2 * W : W >> u, Hin = dn ? 2 * H : H, Win = dn ? 2 * W : W;
     float4 acc[PX];
     const float4 b = hasB ? vload4(c4, B) : (float4)(0.0f);
     for (int j = 0; j < PX; j++) acc[j] = b;
@@ -71,7 +72,7 @@ __kernel void convi(__read_only image2d_t X, __read_only image2d_t Wt, __global 
     const int og = get_global_id(0), x0 = get_global_id(1) * PX, y = get_global_id(2);
 #define G (OC / 4)
     if (og * OC >= Co || x0 >= W || y >= H) return;
-    const int p = K / 2, Ci4 = Ci / 4, Co4 = Co / 4, dn = up < 0, u = up > 0, Hin = dn ? 2 * H : H, Win = dn ? 2 * W : W;
+    const int p = up == -2 ? 0 : K / 2, Ci4 = Ci / 4, Co4 = Co / 4, dn = up < 0, u = up > 0, Hin = dn ? 2 * H : H, Win = dn ? 2 * W : W;
     ACC4 acc[G][PX];
     for (int g = 0; g < G; g++) {
         const float4 b = hasB && og * G + g < Co4 ? vload4(og * G + g, B) : (float4)(0.0f);
@@ -151,4 +152,56 @@ __kernel void gnapply(__read_only image2d_t X, __write_only image2d_t Y, __globa
     const float4 v = convert_float4(read_imageh(X, smpi, (int2)(i, y)));
     const float4 r = fmax((v - st[2 * g]) * st[2 * g + 1] * vload4(c4, gw) + vload4(c4, gb), 0.0f);
     write_imageh(Y, (int2)(i, y), convert_half4(r));
+}
+
+// ---- the Wan 2.2 VAE encoder (model_vaeenc.h) on picture-memory activations ----
+// RMS norm over each pixel's channels: x / ||x|| * g (g carries sqrt(C) and the norm's weight), then SiLU if asked
+__kernel void rmsni(__read_only image2d_t X, __write_only image2d_t Y, __global const float *g, int Wd, int H, int C4, int silu) {
+    const int x = get_global_id(0), y = get_global_id(1);
+    if (x >= Wd || y >= H) return;
+    float ss = 0.0f;
+    for (int c = 0; c < C4; c++) { const float4 v = convert_float4(read_imageh(X, smpi, (int2)(x * C4 + c, y))); ss += dot(v, v); }
+    const float r = rsqrt(fmax(ss, 1e-24f));
+    for (int c = 0; c < C4; c++) {
+        float4 v = convert_float4(read_imageh(X, smpi, (int2)(x * C4 + c, y))) * r * vload4(c, g);
+        if (silu) v = v / (1.0f + exp(-v));
+        write_imageh(Y, (int2)(x * C4 + c, y), convert_half4(v));
+    }
+}
+// Y = A + B (w texels by h rows)
+__kernel void addi(__read_only image2d_t A, __read_only image2d_t B, __write_only image2d_t Y, int w, int h) {
+    const int i = get_global_id(0), y = get_global_id(1);
+    if (i >= w || y >= h) return;
+    write_imageh(Y, (int2)(i, y), convert_half4(convert_float4(read_imageh(A, smpi, (int2)(i, y))) +
+                                                convert_float4(read_imageh(B, smpi, (int2)(i, y)))));
+}
+// one-head attention over all N = Wd x H pixels (q, k, v: C4 texels per pixel each).
+// S[i][j] = q_i . k_j * scale
+__kernel void attns(__read_only image2d_t Q, __read_only image2d_t K, __global float *S, int Wd, int N, int C4, float scale) {
+    const int j = get_global_id(0), i = get_global_id(1);
+    if (i >= N || j >= N) return;
+    const int xi = i % Wd, yi = i / Wd, xj = j % Wd, yj = j / Wd;
+    float d = 0.0f;
+    for (int c = 0; c < C4; c++)
+        d += dot(convert_float4(read_imageh(Q, smpi, (int2)(xi * C4 + c, yi))),
+                 convert_float4(read_imageh(K, smpi, (int2)(xj * C4 + c, yj))));
+    S[(size_t)i * N + j] = d * scale;
+}
+// softmax of each row of S, in place
+__kernel void attnsm(__global float *S, int N) {
+    const int i = get_global_id(0);
+    if (i >= N) return;
+    __global float *r = S + (size_t)i * N;
+    float m = -1e30f; for (int j = 0; j < N; j++) m = fmax(m, r[j]);
+    float t = 0.0f; for (int j = 0; j < N; j++) { const float e = exp(r[j] - m); r[j] = e; t += e; }
+    const float inv = 1.0f / t; for (int j = 0; j < N; j++) r[j] *= inv;
+}
+// O_i = sum_j S[i][j] v_j  (C4 texels per pixel)
+__kernel void attno(__read_only image2d_t V, __global const float *S, __write_only image2d_t O, int Wd, int N, int C4) {
+    const int c = get_global_id(0), i = get_global_id(1);
+    if (c >= C4 || i >= N) return;
+    __global const float *r = S + (size_t)i * N;
+    float4 a = (float4)(0.0f);
+    for (int j = 0; j < N; j++) a += r[j] * convert_float4(read_imageh(V, smpi, (int2)((j % Wd) * C4 + c, j / Wd)));
+    write_imageh(O, (int2)((i % Wd) * C4 + c, i / Wd), convert_half4(a));
 }

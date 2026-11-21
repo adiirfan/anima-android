@@ -177,7 +177,16 @@ bool KleinPipeline::runText(const KleinRequest& req, std::vector<float> taps[3],
 bool KleinPipeline::loadPart(int k, std::string* err) {
     if (part_[k].loaded()) return true;
     bool g = spill_ > 0 && dec_.loaded();
-    return part_[k].load(dir_ + "/part" + std::to_string(k) + ".bin", err, g, g ? dec_.context() : nullptr, 0, graph_);
+    const std::string path = dir_ + "/part" + std::to_string(k) + ".bin";
+    if (part_[k].load(path, err, g, g ? dec_.context() : nullptr, 0, graph_)) return true;
+    // The AI chip's memory is full (768 edits on the 8 Elite Gen 5 build): the reader's pieces have done their work for
+    // this picture, so give their memory back and try once more. The next picture loads them again.
+    bool freed = false;
+    for (auto& t : text_) if (t.loaded()) { t.release(); freed = true; }
+    if (!freed) return false;
+    LOGW("piece %d did not fit (%s); freed the reader and trying again", k, err->c_str());
+    err->clear();
+    return part_[k].load(path, err, g, g ? dec_.context() : nullptr, 0, graph_);
 }
 
 KleinResult KleinPipeline::generate(const KleinRequest& req, const std::function<void(int, int)>& progress) {

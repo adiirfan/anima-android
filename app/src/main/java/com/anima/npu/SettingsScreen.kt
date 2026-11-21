@@ -42,26 +42,20 @@ fun SettingsScreen(onSetup: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Models", style = MaterialTheme.typography.titleSmall)
-        Text("This phone: ${Chip.label}." + if (Chip.supported) "" else " " + Chip.SUPPORTED_TEXT +
-            " On this phone MOSS-Image and Fibo run on the graphics chip instead, more slowly.",
+        if (!Chip.supported) Text("${Chip.label}: no AI chip support, models run on the graphics chip.",
             style = MaterialTheme.typography.bodySmall)
-        if (ModelStore.ALL.any { it.available }) OutlinedButton(onClick = onSetup) { Text("Choose models to download") }
+        OutlinedButton(onClick = onSetup) { Text("Model Management") }
 
         HorizontalDivider()
 
-        Text("Chat model and memory use", style = MaterialTheme.typography.titleSmall)
+        Text("Chat model", style = MaterialTheme.typography.titleSmall)
         // (setting, label, what it means): memory measured on the iQOO 13, 2026-10-09; Balanced and Low writing speeds
         // on the S25 Edge, warm, after the 2026-10-10 streaming changes (were 15 and 14)
         val choices = listOf(
-            Triple(0, "Fastest", "Ling, with everything on the AI chip: about 4.9 GB of memory while it runs, " +
-                "writes about 31 words a second."),
-            Triple(48, "Balanced", "Ling keeps 48 of each layer's 128 experts on the AI chip and reads the rest from " +
-                "storage as needed: about 2.6 GB, writes about 21 words a second."),
-            Triple(32, "Low", "Ling keeps 32 experts per layer on the AI chip: about 2.3 GB, writes about 19 " +
-                "words a second and reads long messages more slowly."),
-            Triple(LocalLing.SMALL, "Lowest", "A much smaller model, Qwen3.5 0.8B, instead of Ling: about 1.4 GB, " +
-                "writes about 25 words a second. Less clever: it sometimes answers in words when you asked for a " +
-                "picture, so ask again or say \"draw\". A 0.8 GB download, offered on the Chat tab."),
+            Triple(0, "Fastest", "Ling · 4.9 GB · 31 words/s"),
+            Triple(48, "Balanced", "Ling · 2.6 GB · 21 words/s"),
+            Triple(32, "Low", "Ling · 2.3 GB · 19 words/s"),
+            Triple(LocalLing.SMALL, "Lowest", "Qwen3.5 0.8B · 1.4 GB · 25 words/s · less clever"),
         )
         var slots by remember { mutableIntStateOf(LocalLing.expertSlots(ctx)) }
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -72,11 +66,6 @@ fun SettingsScreen(onSetup: () -> Unit) {
             }
         }
         Text(choices.first { it.first == slots }.third, style = MaterialTheme.typography.bodySmall)
-        if (slots > 0) {
-            Text("Balanced and Low keep a 3.9 GB copy of Ling's experts next to the model, made the first " +
-                "time Ling starts (about a minute). Choosing Fastest deletes it.", style = MaterialTheme.typography.bodySmall)
-        }
-        Text("Takes effect with the next chat message.", style = MaterialTheme.typography.bodySmall)
 
         HorizontalDivider()
 
@@ -90,15 +79,12 @@ fun SettingsScreen(onSetup: () -> Unit) {
                     contentScale = ContentScale.Crop)
             }
         }
-        Text("Your launcher may take a few seconds to show the new icon. To use any picture instead, open it in the " +
-            "Gallery and tap \"Add to home screen as an icon\".", style = MaterialTheme.typography.bodySmall)
 
         HorizontalDivider()
 
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Show usage stats at the top", style = MaterialTheme.typography.titleSmall)
-                Text("Processor, graphics, AI chip, power, temperature and memory.", style = MaterialTheme.typography.bodySmall)
             }
             Switch(StatsBar.shown(ctx), { StatsBar.set(ctx, it) })
         }
@@ -106,22 +92,9 @@ fun SettingsScreen(onSetup: () -> Unit) {
         if (Chip.supported) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Upscale every new picture 4×", style = MaterialTheme.typography.titleSmall)
-                Text("Each picture is made 4 times bigger before it is saved (768 becomes 3072), which adds a few " +
-                    "seconds. Uses the upscaler that comes with Anima. Clips are not upscaled.", style = MaterialTheme.typography.bodySmall)
             }
             Switch(Upscaler.auto(ctx), { Upscaler.setAuto(ctx, it) })
         }
 
-        if (Chip.supported) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Draw MOSS and Fibo with the graphics chip", style = MaterialTheme.typography.titleSmall)
-                Text(if (GpuEngine.mossReady(ctx) || GpuEngine.fiboReady(ctx))
-                    "Uses the graphics chip instead of the AI chip. Several times slower, for testing the engine " +
-                        "that phones without an AI chip use."
-                else "Needs the graphics-chip files in models/moss/gpu or models/fibo/gpu.",
-                    style = MaterialTheme.typography.bodySmall)
-            }
-            Switch(GpuEngine.forced(ctx), { GpuEngine.setForced(ctx, it) }, enabled = GpuEngine.mossReady(ctx) || GpuEngine.fiboReady(ctx))
-        }
     }
 }

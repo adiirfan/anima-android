@@ -22,21 +22,64 @@ class ModelStore(
     private val eliteUrl: String,   // the file list for Snapdragon 8 Elite (Hexagon v79)
     private val gen5Url: String?,   // the same for 8 Elite Gen 5 (Hexagon v81); null when not built for it yet
     private val sub: String,  // folder under files/models ("" for Anima, which predates the others)
-    private val gpuUrl: String? = null,   // a graphics-chip build for phones without a supported AI chip, if any
+    private val gpuUrl: String? = null,   // a graphics-chip build (the app's own engine, any phone), if any
+    private val onGpu: Boolean = false,   // this store is the graphics-chip build of the model [baseId]
+    val baseId: String = id,
+    /** The same downloaded files run on either chip (the chat models: llama.cpp reads them on the AI chip or the
+     *  graphics chip), so there is no separate graphics-chip download. */
+    val sameFilesOnGpu: Boolean = false,
 ) {
-    /** Where this phone's file list is, or null when the model has no build for its chip. */
+    /**
+     * Where this build's file list is, or null when there is none for this phone: the AI-chip build of the phone's
+     * Snapdragon, or the graphics-chip build (one for every phone).
+     */
     val manifestUrl: String?
-        get() = when (Chip.kind) {
+        get() = if (onGpu) gpuUrl else when (Chip.kind) {
             Chip.Kind.ELITE -> eliteUrl
             Chip.Kind.ELITE_GEN5 -> gen5Url
-            Chip.Kind.UNSUPPORTED -> gpuUrl
+            Chip.Kind.UNSUPPORTED -> if (sameFilesOnGpu) eliteUrl else null
         }
 
-    /** This phone gets the graphics-chip build (no AI chip the app supports). */
-    val onGraphicsChip get() = Chip.kind == Chip.Kind.UNSUPPORTED && gpuUrl != null
+    /** This store is a graphics-chip build. */
+    val onGraphicsChip get() = onGpu
 
-    /** Whether this phone can download and run the model. */
+    /** Whether this phone can download this build. */
     val available get() = manifestUrl != null
+    /** This build's Hugging Face page (the repo its files come from). */
+    val pageUrl: String? get() = manifestUrl?.substringBefore("/resolve/")
+
+    /** The model's graphics-chip build, in models/<model>/gpu/, or null when the model has none. */
+    val gpu: ModelStore? by lazy {
+        if (onGpu || gpuUrl == null) null
+        else ModelStore("$id-gpu", title, licence, eliteUrl, gen5Url, "${sub.ifEmpty { "anima/" }}gpu/", gpuUrl, true, id)
+    }
+
+    /** The AI-chip build exists for this phone (shown as a choice only then). */
+    val aiChip get() = !onGpu && manifestUrl != null && !(sameFilesOnGpu && Chip.kind == Chip.Kind.UNSUPPORTED)
+
+    /** This phone can run the model one way or the other. */
+    val offered get() = available || gpu?.available == true
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("anima", Context.MODE_PRIVATE)
+
+    /**
+     * The model draws on the graphics chip: the user picked it on the models page, or there is no AI-chip build
+     * for this phone. Until the user picks, a build that is already downloaded wins, the AI chip first.
+     */
+    fun runsOnGpu(ctx: Context): Boolean {
+        if (sameFilesOnGpu) return !aiChip || prefs(ctx).getString("runtime_$id", null) == "gpu"
+        val g = gpu ?: return false
+        if (!aiChip) return true
+        prefs(ctx).getString("runtime_$id", null)?.let { return it == "gpu" && g.available }
+        return installed(ctx) == null && g.installed(ctx) != null
+    }
+
+    fun setRunsOnGpu(ctx: Context, on: Boolean) {
+        prefs(ctx).edit().putString("runtime_$id", if (on) "gpu" else "npu").apply()
+    }
+
+    /** The build that draws: this one or its graphics-chip twin. */
+    fun active(ctx: Context): ModelStore = if (runsOnGpu(ctx)) gpu!! else this
 
     companion object {
         private const val HF = "https://huggingface.co/sebekblessing"
@@ -46,15 +89,18 @@ class ModelStore(
             "anima", "Anima",
             "Anima is licensed for non-commercial use (CircleStone Labs Non-Commercial License). Pictures you make may be used for anything.",
             // multi-size + guide set; manifest.json stays for older app builds
-            "$HF/anima-qnn-8elite/resolve/main/manifest2.json", "$HF/anima-qnn-8elite-gen5/resolve/main/manifest2.json", "")
+            "$HF/anima-qnn-8elite/resolve/main/manifest2.json", "$HF/anima-qnn-8elite-gen5/resolve/main/manifest2.json", "",
+            "$HF/anima-gpu/resolve/main/manifest.json")
         val KLEIN = ModelStore(
             "klein", "FLUX.2 klein 4B",
             "FLUX.2 [klein] 4B is released by Black Forest Labs under the Apache 2.0 licence.",
-            "$HF/klein-4b-qnn-8elite/resolve/main/manifest.json", null, "klein/")
+            "$HF/klein-4b-qnn-8elite/resolve/main/manifest.json", "$HF/klein-4b-qnn-8elite-gen5/resolve/main/manifest.json", "klein/",
+            "$HF/klein-4b-gpu/resolve/main/manifest.json")
         val QWEN = ModelStore(
             "qwen", "Qwen-Image 2.1",
             "Qwen-Image 2.1 is released under the Qwen Research License: non-commercial use only. Built with Qwen.",
-            "$HF/qwen-image-2.1-qnn-8elite/resolve/main/manifest.json", "$HF/qwen-image-2.1-qnn-8elite-gen5/resolve/main/manifest.json", "qwen/")
+            "$HF/qwen-image-2.1-qnn-8elite/resolve/main/manifest.json", "$HF/qwen-image-2.1-qnn-8elite-gen5/resolve/main/manifest.json", "qwen/",
+            "$HF/qwen-image-2.1-gpu/resolve/main/manifest.json")
         val FIBO = ModelStore(
             "fibo", "Fibo 2.0 edit",
             "Fibo 2.0 is released by Bria under CC BY-NC 4.0: non-commercial use only.",
@@ -69,27 +115,34 @@ class ModelStore(
             "wan", "Wan 2.2 clips",
             "Wan 2.2 (Alibaba), its LightTAE decoder and the umT5 prompt reader are released under the Apache 2.0 " +
                 "licence. The Turbo version's page names no licence.",
-            "$HF/wan22-qnn-8elite/resolve/main/manifest.json", "$HF/wan22-qnn-8elite-gen5/resolve/main/manifest.json", "wan/")
+            "$HF/wan22-qnn-8elite/resolve/main/manifest.json", "$HF/wan22-qnn-8elite-gen5/resolve/main/manifest.json", "wan/",
+            "$HF/wan22-gpu/resolve/main/manifest.json")
         val LING = ModelStore(
             "ling", "Ling-3.0-tiny (chat)",
             "Ling-3.0-tiny is released by inclusionAI under the MIT licence.",
-            "$CHAT/ling/manifest.json", "$CHAT/ling/manifest.json", "ling/")
+            "$CHAT/ling/manifest.json", "$CHAT/ling/manifest.json", "ling/", sameFilesOnGpu = true)
         val SMALLCHAT = ModelStore(
             "smallchat", "Qwen3.5 0.8B (small chat)",
             "Qwen3.5 0.8B is released by the Qwen team (Alibaba) under the Apache 2.0 licence.",
-            "$CHAT/smallchat/manifest.json", "$CHAT/smallchat/manifest.json", "smallchat/")
+            "$CHAT/smallchat/manifest.json", "$CHAT/smallchat/manifest.json", "smallchat/", sameFilesOnGpu = true)
         val ALL = listOf(ANIMA, KLEIN, QWEN, FIBO, MOSS, WAN, LING, SMALLCHAT)
         /** The picture models, for the Create screen's picker. */
         val PICTURE = listOf(ANIMA, KLEIN, QWEN, FIBO, MOSS)
         /** The first-run setup's lists: what makes pictures (and clips), and the chat models. */
         val SETUP_PICTURE = listOf(ANIMA, MOSS, FIBO, WAN, QWEN, KLEIN)
         val SETUP_CHAT = listOf(LING, SMALLCHAT)
-        fun byId(id: String) = ALL.first { it.id == id }
+        fun byId(id: String) = ALL.firstOrNull { it.id == id } ?: ALL.mapNotNull { it.gpu }.first { it.id == id }
     }
 
     data class FileInfo(val path: String, val name: String, val size: Long, val sha256: String)
     data class Variant(val id: String, val label: String, val about: String, val files: List<FileInfo>)
-    data class Manifest(val base: String, val shared: List<FileInfo>, val variants: List<Variant>) {
+    /**
+     * A model's file list. [version] goes up whenever its files change on Hugging Face, and [notes] says what
+     * changed; an update downloads only the files whose checksum changed, never the whole model again.
+     */
+    data class Manifest(
+        val base: String, val shared: List<FileInfo>, val variants: List<Variant>, val version: Int = 1, val notes: String = "",
+    ) {
         fun variant(id: String) = variants.first { it.id == id }
         fun bytes(id: String) = (shared + variant(id).files).sumOf { it.size }
     }
@@ -99,6 +152,17 @@ class ModelStore(
     private fun variantFile(ctx: Context) = File(modelDir(ctx), "variant.txt")
     // name -> sha256 of every file as installed, so a changed manifest shows up as an update
     private fun installedFile(ctx: Context) = File(modelDir(ctx), "installed.json")
+    // the manifest version the installed files came from (absent = 1, the lists before versions existed)
+    private fun versionFile(ctx: Context) = File(modelDir(ctx), "version.txt")
+
+    /** The installed files' version number. */
+    fun installedVersion(ctx: Context): Int = versionFile(ctx).takeIf { it.isFile }?.readText()?.trim()?.toIntOrNull() ?: 1
+
+    /** When every installed file already matches [m] (nothing to update), the installed files are [m]'s version. */
+    fun noteVersion(ctx: Context, m: Manifest) {
+        if (installed(ctx) != null && m.version > installedVersion(ctx) && outdated(ctx, m).isEmpty())
+            versionFile(ctx).writeText(m.version.toString())
+    }
 
     private fun installedShas(ctx: Context): Map<String, String> =
         installedFile(ctx).takeIf { it.isFile }?.let { f ->
@@ -128,7 +192,7 @@ class ModelStore(
             val x = v.getJSONObject(k)
             Variant(k, x.getString("label"), x.getString("about"), files(x.getJSONArray("files")))
         }.toList()
-        return Manifest(o.getString("base"), files(o.getJSONArray("shared")), variants)
+        return Manifest(o.getString("base"), files(o.getJSONArray("shared")), variants, o.optInt("version", 1), o.optString("notes", ""))
     }
 
     /**
@@ -148,6 +212,27 @@ class ModelStore(
         if (!files.all { File(dir, it.name).length() == it.size }) return null
         installedFile(ctx).writeText(JSONObject(files.associate { it.name to it.sha256 }).toString())
         return id
+    }
+
+    /**
+     * Removes this build's files (not the other build's folder inside it). The caller frees the engines first.
+     * The cached file list stays, so the page can still say how big a new download would be.
+     */
+    fun delete(ctx: Context) {
+        variantFile(ctx).delete()   // first: a half-deleted model must never look installed
+        modelDir(ctx).listFiles()?.filter { it.isFile && it.name != "manifest.json" }?.forEach { it.delete() }
+    }
+
+    /**
+     * Phones without the AI chip used to get the graphics-chip build straight into models/<model>/. It now lives
+     * in models/<model>/gpu/ next to the AI-chip build; moves the files there once (a rename, no copying).
+     */
+    fun moveOldGpuInstall(ctx: Context) {
+        val g = gpu ?: return
+        val dir = modelDir(ctx)
+        if (variantFile(ctx).takeIf { it.isFile }?.readText()?.trim() != "gpu") return
+        val to = g.modelDir(ctx).apply { mkdirs() }
+        dir.listFiles()?.filter { it.isFile }?.forEach { it.renameTo(File(to, it.name)) }
     }
 
     private fun dm(ctx: Context) = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
@@ -242,9 +327,10 @@ class ModelStore(
         variantFile(ctx).delete()  // half-switched state must not look installed
         for (f in need) File(dir, f.name + ".part").renameTo(File(dir, f.name))
         installedFile(ctx).writeText(JSONObject(wanted.associate { it.name to it.sha256 }).toString())
+        versionFile(ctx).writeText(m.version.toString())
         variantFile(ctx).writeText(variant)
         // files the installed set no longer uses (the 16-bit word table once the 8-bit one is in, 311 MB)
-        val keep = wanted.map { it.name }.toSet() + setOf("manifest.json", "installed.json", "variant.txt")
+        val keep = wanted.map { it.name }.toSet() + setOf("manifest.json", "installed.json", "variant.txt", "version.txt")
         dir.listFiles()?.filter { it.isFile && it.name !in keep && !it.name.endsWith(".part") }?.forEach { it.delete() }
     }
 }

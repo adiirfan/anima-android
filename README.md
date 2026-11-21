@@ -29,9 +29,18 @@ the chip they were built for, so the app picks the repos by chip. On the Snapdra
 On the 8 Elite Gen 5 it uses
 [anima-qnn-8elite-gen5](https://huggingface.co/sebekblessing/anima-qnn-8elite-gen5),
 [fibo-qnn-8elite-gen5](https://huggingface.co/sebekblessing/fibo-qnn-8elite-gen5),
-[moss-qnn-8elite-gen5](https://huggingface.co/sebekblessing/moss-qnn-8elite-gen5) and
-[wan22-qnn-8elite-gen5](https://huggingface.co/sebekblessing/wan22-qnn-8elite-gen5); FLUX.2 klein and Qwen-Image are
-not built for that chip yet. The two chat models (Ling-3.0-tiny and the smaller Qwen3.5 0.8B) are plain llama.cpp
+[moss-qnn-8elite-gen5](https://huggingface.co/sebekblessing/moss-qnn-8elite-gen5),
+[wan22-qnn-8elite-gen5](https://huggingface.co/sebekblessing/wan22-qnn-8elite-gen5) and
+[klein-4b-qnn-8elite-gen5](https://huggingface.co/sebekblessing/klein-4b-qnn-8elite-gen5) (768x768, square only);
+Qwen-Image is not built for that chip's neural unit yet.
+
+Every picture model also has a build for the phone's graphics chip, which the Models screen offers next to the
+neural-unit one ("Draws on"): [anima-gpu](https://huggingface.co/sebekblessing/anima-gpu),
+[klein-4b-gpu](https://huggingface.co/sebekblessing/klein-4b-gpu),
+[qwen-image-2.1-gpu](https://huggingface.co/sebekblessing/qwen-image-2.1-gpu) (pictures only, no edits),
+[fibo-gpu](https://huggingface.co/sebekblessing/fibo-gpu), [moss-gpu](https://huggingface.co/sebekblessing/moss-gpu)
+and [wan22-gpu](https://huggingface.co/sebekblessing/wan22-gpu). A build that is not available for a phone is shown
+greyed out, not hidden. The two chat models (Ling-3.0-tiny and the smaller Qwen3.5 0.8B) are plain llama.cpp
 files that run on both chips, from [anima-chat-models](https://huggingface.co/sebekblessing/anima-chat-models). Anima, Qwen-Image and Fibo are licensed for **non-commercial use only**; FLUX.2 [klein] 4B,
 MOSS-Image and Wan 2.2 are Apache 2.0 (the Wan Turbo version's page names no licence). See the licence and notice
 files in each repo. Ling-3.0-tiny is MIT-licensed by inclusionAI.

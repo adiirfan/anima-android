@@ -52,6 +52,7 @@ object LocalLing {
     private val ring = ArrayDeque<String>()
 
     fun running(): Boolean = proc?.isAlive == true
+    @Volatile private var startedOnGpu = false   // the chip the running server was started on
 
     /** The server's last line of output: shown when it fails to start. */
     val lastLog: String get() = synchronized(ring) { ring.lastOrNull() ?: "" }
@@ -68,7 +69,8 @@ object LocalLing {
      */
     @Synchronized
     fun start(ctx: Context, say: (String) -> Unit = {}): Boolean {
-        if (running() && answers()) return true
+        val onGpu = store(ctx).runsOnGpu(ctx)   // Model Management's "Runs on" choice
+        if (running() && answers() && startedOnGpu == onGpu) return true
         stop()
         if (!ready(ctx)) { say("${name(ctx)} is not downloaded yet"); return false }
         val small = small(ctx)
@@ -77,8 +79,8 @@ object LocalLing {
         val libs = ctx.applicationInfo.nativeLibraryDir
         val cmd = listOf(
             "$libs/libllama-server.so", "-m", modelFile(ctx).absolutePath,
-            // the AI chip; without this it quietly uses the processor
-            "--device", "HTP0", "-ngl", "99",
+            // the AI chip or the graphics chip; without this it quietly uses the processor
+            "--device", if (onGpu) "GPUOpenCL" else "HTP0", "-ngl", "99",
             // one conversation at a time: the default 4 slots only cost memory
             "-c", "8192", "-np", "1",
             "--host", "127.0.0.1", "--port", PORT.toString(), "--alias", "ling",
@@ -101,7 +103,7 @@ object LocalLing {
         pb.environment()["LD_LIBRARY_PATH"] = "$libs:/system/lib64:/vendor/lib64:/system/vendor/lib64"
         pb.environment()["ADSP_LIBRARY_PATH"] = libs
         val slots = expertSlots(ctx)
-        if (slots > 0) {
+        if (slots > 0 && !onGpu) {   // keeping only some experts is the AI chip's: the graphics chip holds them all
             pb.environment()["GGML_HEXAGON_EXPERT_SLOTS"] = slots.toString()
             pb.environment()["GGML_HEXAGON_EXPERT_FILE"] = expertFile(ctx).absolutePath
             // Low memory stops for the chip once per layer to see which experts it picked; watching for the answer
@@ -114,7 +116,7 @@ object LocalLing {
         val started = try { pb.start() } catch (e: Exception) {
             keep("could not start: ${e.message}"); say("Could not start ${name(ctx)}: ${e.message}"); return false
         }
-        proc = started
+        proc = started; startedOnGpu = onGpu
         Thread {
             runCatching {
                 started.inputStream.bufferedReader().forEachLine { line ->

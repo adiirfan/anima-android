@@ -35,7 +35,7 @@ import kotlinx.coroutines.coroutineScope
 private fun gb(bytes: Long) = "%.1f GB".format(bytes / 1e9)
 
 /** What each model does, in a line, for the setup list. */
-private val ABOUT = mapOf(
+internal val MODEL_ABOUT = mapOf(
     "anima" to "Anime-style pictures from a prompt, in six sizes. The quickest to draw.",
     "moss" to "768×768 pictures from plain sentences, in 8 steps.",
     "fibo" to "Changes your own pictures as you describe. Edits only.",
@@ -66,7 +66,7 @@ fun SetupScreen(firstRun: Boolean, onDone: () -> Unit) {
     if (!firstRun) androidx.activity.compose.BackHandler(onBack = onDone)
     Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(if (firstRun) "Welcome to Anima" else "Choose models", style = MaterialTheme.typography.headlineSmall)
-        if (ModelStore.ALL.none { it.available }) {
+        if (ModelStore.ALL.none { it.offered }) {
             DeviceNotSupported()
             Button(onClick = onDone) { Text("Continue") }
             return@Column
@@ -78,11 +78,12 @@ fun SetupScreen(firstRun: Boolean, onDone: () -> Unit) {
                 "Nothing is sent anywhere after the download.",
             style = MaterialTheme.typography.bodySmall)
 
-        val all = ModelStore.SETUP_PICTURE + ModelStore.SETUP_CHAT
+        // each model's default build: the AI chip when this phone has one the model is built for, else the graphics chip
+        val all = (ModelStore.SETUP_PICTURE + ModelStore.SETUP_CHAT).map { it.active(ctx) }
         val manifests = remember { mutableStateMapOf<String, ModelStore.Manifest>() }
         var listStatus by remember { mutableStateOf("Getting the model lists…") }
         // nothing ticked until the user picks; Anima is the one most people want, so it starts ticked
-        val chosen = remember { mutableStateMapOf((if (Chip.supported) "anima" else "moss") to true) }
+        val chosen = remember { mutableStateMapOf(ModelStore.byId(if (Chip.supported) "anima" else "moss").active(ctx).id to true) }
         var started by remember { mutableStateOf(Installer.tasks.isNotEmpty()) }
 
         LaunchedEffect(Unit) {
@@ -104,7 +105,8 @@ fun SetupScreen(firstRun: Boolean, onDone: () -> Unit) {
         val free = remember { runCatching { StatFs(ctx.getExternalFilesDir(null)!!.path).availableBytes }.getOrDefault(0L) }
 
         @Composable
-        fun row(st: ModelStore) {
+        fun row(model: ModelStore) {
+            val st = model.active(ctx)
             val have = st.installed(ctx) != null
             val size = sizeOf(st)
             val can = st.available && !have && size != null && !started
@@ -113,7 +115,7 @@ fun SetupScreen(firstRun: Boolean, onDone: () -> Unit) {
                     Checkbox(checked = can && chosen[st.id] == true || have, onCheckedChange = { chosen[st.id] = it }, enabled = can)
                     Column(Modifier.padding(start = 8.dp).weight(1f)) {
                         Text(st.title, style = MaterialTheme.typography.titleMedium)
-                        Text(ABOUT[st.id] ?: "", style = MaterialTheme.typography.bodySmall)
+                        Text(MODEL_ABOUT[st.baseId] ?: "", style = MaterialTheme.typography.bodySmall)
                         Text(when {
                             !st.available -> "Not available for ${Chip.label} yet"
                             have -> "Downloaded"

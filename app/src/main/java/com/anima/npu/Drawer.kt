@@ -14,16 +14,18 @@ object Drawer {
     /** [progress] gets (step, total): step 0 while reading the prompt. Throws with the engine's message on failure. */
     suspend fun draw(ctx: Context, j: Job, progress: (Int, Int) -> Unit): Result = withContext(Dispatchers.Default) {
         val err = when (j.model) {
-            "klein" -> Engines.ensureKlein()
-            "qwen" -> Engines.ensureQwen(j.qwenDrawing)
+            "klein" -> if (GpuEngine.useForKlein(ctx)) null else Engines.ensureKlein()
+            "qwen" -> if (GpuEngine.useForQwen(ctx)) null else Engines.ensureQwen(j.qwenDrawing)
             "fibo" -> if (GpuEngine.useForFibo(ctx)) null else Engines.ensureFibo()
             "moss" -> if (GpuEngine.useForMoss(ctx)) null else Engines.ensureMoss()
-            "wan" -> Engines.ensureWan()
+            "wan" -> if (GpuEngine.useForWan(ctx)) null else Engines.ensureWan()
             "upscale" -> null
-            else -> Engines.ensureAnima()
+            else -> if (GpuEngine.useForAnima(ctx)) null else Engines.ensureAnima()
         }
         if (err != null) error("Could not start: $err")
-        val (w, h) = if (j.model in BIG_MODELS) 768 to 768 else pictureSize(if (j.model == "klein") 0 else j.tier, j.shape)
+        // Klein: 512 with the 8 Elite AI-chip build, 768 on Gen 5 and on the graphics chip (see kleinTier)
+        val kleinTier = kleinTier(ctx)
+        val (w, h) = if (j.model in BIG_MODELS) 768 to 768 else pictureSize(if (j.model == "klein") kleinTier else j.tier, if (j.model == "klein" && kleinSquareOnly(ctx)) 0 else j.shape)
         val src = j.sourceFile?.let { BitmapFactory.decodeFile(File(Queue.dir(ctx), it).absolutePath) }
         val p = Progress { i, n -> progress(i, n) }
         val t0 = System.currentTimeMillis()
@@ -38,17 +40,26 @@ object Drawer {
             val e = src?.let { guidePixels(it, w, h) } ?: error("Wan makes a clip from a picture: choose a picture to animate")
             val rgb = ByteArray(w * h * 3)
             for (i in e.indices) { val c = e[i]; rgb[3 * i] = (c shr 16).toByte(); rgb[3 * i + 1] = (c shr 8).toByte(); rgb[3 * i + 2] = c.toByte() }
-            val rows = WanReader.read(ctx, ModelStore.WAN.modelDir(ctx), j.prompt)
-            val all = Engine.wanGenerate(rows, rgb, j.seed, p) ?: error(Engine.lastError())
+            val gpu = GpuEngine.useForWan(ctx)
+            // each build carries its own copy of the prompt reader (it runs on the processor either way)
+            val rows = WanReader.read(ctx, if (gpu) GpuEngine.wanDir(ctx) else ModelStore.WAN.modelDir(ctx), j.prompt)
+            val frames = if (gpu) {
+                Engines.release()   // whatever the AI chip still holds: the graphics chip needs the memory
+                GpuEngine.wanGenerate(ctx, rows, e, j.seed, p)
+            } else {
+                val all = Engine.wanGenerate(rows, rgb, j.seed, p) ?: error(Engine.lastError())
+                List(all.size / (w * h)) { f -> all.copyOfRange(f * w * h, (f + 1) * w * h) }
+            }
             val ms = System.currentTimeMillis() - t0
-            val frames = List(all.size / (w * h)) { f -> all.copyOfRange(f * w * h, (f + 1) * w * h) }
             val entry = Gallery.saveVideo(ctx, frames, w, h, j.prompt, j.seed, 8, ms)
             return@withContext Result(Bitmap.createBitmap(frames[0], w, h, Bitmap.Config.ARGB_8888), entry, ms)
         }
         val px = when (j.model) {
             "moss" -> {
                 val gpu = GpuEngine.useForMoss(ctx)
-                val (cond, unc) = MossReader.read(ctx, ModelStore.MOSS.modelDir(ctx), j.prompt, aiChip = Chip.supported)
+                // each build carries its own copy of the reader
+                val (cond, unc) = MossReader.read(ctx, if (gpu) GpuEngine.weightsDir(ctx) else ModelStore.MOSS.modelDir(ctx),
+                    j.prompt, aiChip = Chip.supported)
                 if (gpu) {
                     Engines.release()   // whatever the AI chip still holds: the graphics chip needs the memory
                     GpuEngine.mossGenerate(ctx, cond, j.seed, p)
@@ -61,12 +72,27 @@ object Drawer {
                     GpuEngine.fiboGenerate(ctx, j.prompt, j.seed, e, p)
                 } else Engine.fiboGenerate(QwenImageTokens.encodeFibo(j.prompt), j.seed, e, p)
             }
-            "qwen" -> {
+            "qwen" -> if (GpuEngine.useForQwen(ctx)) {
+                if (src != null) error("Editing with Qwen-Image needs the AI-chip version: the graphics-chip version only draws from text")
+                Engines.release()   // whatever the AI chip still holds: the graphics chip needs the memory
+                QwenImageTokens.init(GpuEngine.qwenDir(ctx))   // the graphics download carries its own word list
+                GpuEngine.qwenGenerate(ctx, QwenImageTokens.encode(j.prompt, false), j.seed, w, h, p)
+            } else {
                 val e = if (ModelStore.QWEN.installed(ctx) == "small") null else src?.let { guidePixels(it, w, h) }
                 Engine.qwenGenerate(QwenImageTokens.encode(j.prompt, e != null), j.seed, w, h, e, p)
             }
-            "klein" -> Engine.kleinGenerate(KleinTokens.encode(j.prompt), j.seed, 4, w, h, src?.let { guidePixels(it, w, h) }, p)
-            else -> {
+            "klein" -> if (GpuEngine.useForKlein(ctx)) {
+                Engines.release()   // whatever the AI chip still holds: the graphics chip needs the memory
+                KleinTokens.init(GpuEngine.kleinDir(ctx))   // the graphics download carries its own word list
+                GpuEngine.kleinGenerate(ctx, KleinTokens.encode(j.prompt), j.seed, 8, w, h, src?.let { guidePixels(it, w, h) }, p)
+            } else Engine.kleinGenerate(KleinTokens.encode(j.prompt), j.seed, if (Chip.kind == Chip.Kind.ELITE_GEN5) 8 else 4, w, h, src?.let { guidePixels(it, w, h) }, p)
+            else -> if (GpuEngine.useForAnima(ctx)) {
+                if (src != null) error("Guide pictures need Anima on the AI chip")
+                Engines.release()   // whatever the AI chip still holds: the graphics chip needs the memory
+                Tokens.init(GpuEngine.animaDir(ctx))   // the graphics download carries its own word lists
+                val t = Tokens.encode(j.prompt)
+                GpuEngine.animaGenerate(ctx, t.qwen, t.t5, t.t5Weights, j.seed, j.steps, w, h, p)
+            } else {
                 val t = Tokens.encode(j.prompt)
                 Engine.generate(t.qwen, t.t5, t.t5Weights, j.seed, j.steps, w, h, src?.let { guidePixels(it, w, h) },
                     j.guideStrength, j.guideEnd, null, p)

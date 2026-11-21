@@ -45,6 +45,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.collectAsState
@@ -78,6 +79,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.debounce
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -113,6 +116,11 @@ class CreateState {
     var prompt: String
         get() = when (model) { "klein" -> kleinPrompt; "qwen" -> qwenPrompt; "fibo" -> fiboPrompt; "moss" -> mossPrompt; "wan" -> wanPrompt; else -> animaPrompt }
         set(v) { when (model) { "klein" -> kleinPrompt = v; "qwen" -> qwenPrompt = v; "fibo" -> fiboPrompt = v; "moss" -> mossPrompt = v; "wan" -> wanPrompt = v; else -> animaPrompt = v } }
+    /** Puts back each model's saved prompt; [saved] gives the stored text for a model id, or null for none. */
+    fun restorePrompts(saved: (String) -> String?) {
+        saved("anima")?.let { animaPrompt = it }; saved("klein")?.let { kleinPrompt = it }; saved("qwen")?.let { qwenPrompt = it }
+        saved("fibo")?.let { fiboPrompt = it }; saved("moss")?.let { mossPrompt = it }; saved("wan")?.let { wanPrompt = it }
+    }
     var edit by mutableStateOf<Bitmap?>(null)  // Klein / Qwen: the picture to change (cropped per size); null = new picture
     var seed by mutableStateOf(Random.nextLong(0, 1_000_000_000))
     var seedLocked by mutableStateOf(false)  // the user typed a seed: keep it for the next jobs too
@@ -165,6 +173,8 @@ fun GifPlayer(uri: Uri, modifier: Modifier = Modifier) {
 // Times are 8 steps on the iQOO 13 (8 Elite).
 val SIZE_TIERS = listOf("512" to "about 6 s", "768" to "about 17 s")
 const val KLEIN_TIME = "4 steps · about 6 s, edits about 13 s"
+const val KLEIN_GPU_TIME = "8 steps on the graphics chip"
+const val KLEIN_GEN5_TIME = "8 steps · about 45 s, edits about 2.5 min"   // 8 Elite Gen 5 AI-chip build, 768x768
 const val QWEN_TIME = "8 steps · about 3 min 20 s, edits about 5 min"   // Qwen-Image-2.1-Turbo, iQOO 13 2026-11-06
 const val NOCTQ_TIME = "4 steps · about 1 min 20 s, edits about 3 min"
 /** Folder (inside Qwen's) holding Noct Q V4's drawing files, copied over the cable: no download for it. */
@@ -188,6 +198,13 @@ private val SIZES = listOf(
 )
 fun pictureSize(tier: Int, shape: Int): Pair<Int, Int> = SIZES[tier][shape]
 
+/** Klein's size tier: 768 on the graphics chip (512 drew broken bodies there) and with the 8 Elite Gen 5 AI-chip
+ *  build (built for 768); 512 with the 8 Elite's AI-chip build. */
+fun kleinTier(ctx: android.content.Context) = if (GpuEngine.useForKlein(ctx) || Chip.kind == Chip.Kind.ELITE_GEN5) 1 else 0
+
+/** Klein's 8 Elite Gen 5 AI-chip build draws 768x768 only (three shapes in one piece would not pack). */
+fun kleinSquareOnly(ctx: android.content.Context) = !GpuEngine.useForKlein(ctx) && Chip.kind == Chip.Kind.ELITE_GEN5
+
 /** [tier, shape] of a picture size, or null if it is not one of ours. */
 fun sizeIndex(w: Int, h: Int): Pair<Int, Int>? {
     SIZES.forEachIndexed { t, row -> row.forEachIndexed { k, wh -> if (wh == w to h) return t to k } }
@@ -208,8 +225,22 @@ class MainActivity : ComponentActivity() {
     // a finished picture to open, from a "Picture ready" notification
     private val openUri = mutableStateOf<String?>(null)
 
+    // test builds only, when files/test-shortcut exists (made over the cable with run-as): `--es draw <model>
+    // --es prompt "<text>" [--el seed N] [--ei steps N] [--ei tier N] [--es source <file in the queue folder>]` adds one
+    // picture to the queue, to check every model from the computer
+    private fun testDraw(intent: android.content.Intent) {
+        if (!BuildConfig.DEBUG || !File(filesDir, "test-shortcut").exists()) return
+        val model = intent.getStringExtra("draw") ?: return
+        val id = java.util.UUID.randomUUID().toString().take(12)
+        Queue.store.add(Job(id, System.currentTimeMillis(), model, "qwen", intent.getStringExtra("prompt") ?: "a cat",
+            intent.getLongExtra("seed", 42L), intent.getIntExtra("steps", 8), intent.getIntExtra("tier", 0), 0,
+            1f, 0.5f, intent.getStringExtra("source"), "create"))
+        QueueService.kick(this)
+    }
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
+        testDraw(intent)
         intent.getStringExtra("openUri")?.let { openUri.value = it }
     }
 
@@ -219,7 +250,17 @@ class MainActivity : ComponentActivity() {
         val modelDir = File(root, "models")
         // The app must create these folders itself; one made over the cable first is not readable by the app.
         modelDir.mkdirs()
-        ModelStore.ALL.forEach { it.modelDir(this).mkdirs() }
+        ModelStore.ALL.forEach { st ->
+            st.moveOldGpuInstall(this)
+            st.modelDir(this).mkdirs(); st.gpu?.modelDir(this)?.mkdirs()
+        }
+        // the old Settings switch "Draw MOSS and Fibo with the graphics chip" becomes each model's own choice
+        getSharedPreferences("anima", MODE_PRIVATE).let { p ->
+            if (p.contains("gpuEngine")) {
+                if (p.getBoolean("gpuEngine", false)) listOf(ModelStore.MOSS, ModelStore.FIBO).forEach { it.setRunsOnGpu(this, true) }
+                p.edit().remove("gpuEngine").apply()
+            }
+        }
         val libDir = applicationInfo.nativeLibraryDir
         val selfTest = intent.getBooleanExtra("selftest", false)
         val loadOpts = intent.getIntExtra("loadopts", -1)
@@ -239,12 +280,15 @@ class MainActivity : ComponentActivity() {
             val img = intent.getStringExtra("image")?.let { android.graphics.BitmapFactory.decodeFile(File(filesDir, it).absolutePath) }
             Chat.get(this).send(intent.getStringExtra("conv"), msg, img, intent.getBooleanExtra("think", false))
         }
+        testDraw(intent)
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 val ctx = this@MainActivity
                 // installed variant per model (ModelStore id -> variant id or null)
-                var installedOf by remember { mutableStateOf(ModelStore.ALL.associate { it.id to it.installed(ctx) }) }
+                // (judged by the build the model draws with: AI chip or graphics chip, as chosen on the models page)
+                fun scanInstalled() = ModelStore.ALL.associate { it.id to it.active(ctx).installed(ctx) }
+                var installedOf by remember { mutableStateOf(scanInstalled()) }
                 val installed = installedOf["anima"]
                 var downloadFor by remember { mutableStateOf<String?>(null) }  // ModelStore id whose download screen is open
                 var updating by remember { mutableStateOf(false) }
@@ -252,16 +296,17 @@ class MainActivity : ComponentActivity() {
                 // Quietly look for newer model files once per launch (the lists are tiny).
                 LaunchedEffect(installedOf) {
                     if (!selfTest) for (st in ModelStore.ALL) if (installedOf[st.id] != null) runCatching {
-                        val m = st.fetchManifest(ctx)
-                        updateBytesOf = updateBytesOf + (st.id to st.outdated(ctx, m).sumOf { it.size })
+                        val a = st.active(ctx)
+                        val m = a.fetchManifest(ctx)
+                        updateBytesOf = updateBytesOf + (st.id to a.outdated(ctx, m).sumOf { it.size })
                     }
                 }
                 // a finished download, wherever the user is: the engine reads the new files (sizes, tables) afresh
                 // (several can finish at once now that downloads run side by side)
                 LaunchedEffect(Installer.finished.size) {
                     while (Installer.finished.isNotEmpty()) {
-                        val (sid, v) = Installer.finished.removeAt(0)
-                        installedOf = installedOf + (sid to v)
+                        val sid = ModelStore.byId(Installer.finished.removeAt(0).first).baseId   // a graphics-chip build counts as its model
+                        installedOf = scanInstalled()
                         if (downloadFor == sid) { downloadFor = null; updating = false }
                         updateBytesOf = updateBytesOf + (sid to 0L)
                         Engines.invalidate(sid)
@@ -279,8 +324,16 @@ class MainActivity : ComponentActivity() {
                         it.tier = prefs.getInt("tier", 0).coerceIn(0, SIZE_TIERS.size - 1)
                         it.shape = prefs.getInt("shape", 0).coerceIn(0, SHAPES.size - 1)
                         it.model = (prefs.getString("model", "anima") ?: "anima")
-                            .takeIf { m -> ModelStore.ALL.any { st -> st.id == m && st.available } } ?: "anima"
+                            .takeIf { m -> ModelStore.ALL.any { st -> st.id == m && st.offered } } ?: "anima"
                         it.qwenDrawing = prefs.getString("qwenDrawing", "qwen").takeIf { d -> d == "noctq" } ?: "qwen"
+                        // each model's last prompt, as the user left it (GitHub issue 1: it went back to the example)
+                        it.restorePrompts { m -> prefs.getString("prompt_$m", null) }
+                    }
+                }
+                // save the prompt as it is typed (a moment after the last key), so leaving the app keeps it
+                LaunchedEffect(Unit) {
+                    snapshotFlow { create.model to create.prompt }.debounce(600).collect { (m, p) ->
+                        prefs.edit().putString("prompt_$m", p).apply()
                     }
                 }
                 var tab by remember { mutableIntStateOf(0) }
@@ -350,15 +403,18 @@ class MainActivity : ComponentActivity() {
                 ) { pad ->
                     Box(Modifier.padding(pad).fillMaxSize()) {
                         when {
-                            showSetup -> Readable { SetupScreen(firstRun = !prefs.getBoolean("setupDone", false), onDone = {
+                            showSetup && !prefs.getBoolean("setupDone", false) -> Readable { SetupScreen(firstRun = true, onDone = {
                                 prefs.edit().putBoolean("setupDone", true).apply()
                                 showSetup = false; tab = 0
                             }) }
+                            // the models page: download, delete, update, and which chip each model draws on
+                            showSetup -> Readable { ModelsScreen(onChanged = { installedOf = scanInstalled() },
+                                onBack = { installedOf = scanInstalled(); showSetup = false }) }
                             downloadFor != null -> {
-                                val st = ModelStore.byId(downloadFor ?: "anima")
+                                val st = ModelStore.byId(downloadFor ?: "anima").active(ctx)
                                 Readable { DownloadScreen(
                                     store = st,
-                                    current = installedOf[st.id],
+                                    current = st.installed(ctx),
                                     beforeSwap = { Engine.release() },
                                     onBack = { downloadFor = null; updating = false },
                                     update = updating,
@@ -375,7 +431,7 @@ class MainActivity : ComponentActivity() {
                                 val st = ModelStore.byId(create.model)
                                 val inst = installedOf[st.id]
                                 Create(create, Engines::ensureAnima, Engines::ensureKlein, { Engines.ensureQwen(create.qwenDrawing) },
-                                    modelLabel = st.title + (st.cachedManifest(ctx)?.variants?.firstOrNull { it.id == inst }?.label?.takeIf { it != st.title }?.let { " · $it" } ?: ""),
+                                    modelLabel = st.title + (st.active(ctx).cachedManifest(ctx)?.variants?.firstOrNull { it.id == inst }?.label?.takeIf { it != st.title }?.let { " · $it" } ?: ""),
                                     installed = inst != null, animaInstalled = installed != null,
                                     onChangeModel = { downloadFor = st.id }, onDownload = { downloadFor = st.id },
                                     updateBytes = updateBytesOf[st.id] ?: 0L, onUpdate = { updating = true; downloadFor = st.id },
@@ -485,7 +541,7 @@ fun Create(
             if (s.edit == null) s.status = "Could not read that picture"
         }
     }
-    if (ModelStore.PICTURE.none { it.available }) {   // phones without the AI chip still get MOSS on the graphics chip
+    if (ModelStore.PICTURE.none { it.offered }) {   // phones without the AI chip still get MOSS on the graphics chip
         DeviceNotSupported(Modifier.padding(16.dp))
         return
     }
@@ -498,7 +554,7 @@ fun Create(
                 Triple("qwen", "noctq", "Noct Q").takeIf { File(ModelStore.QWEN.modelDir(ctx), "$NOCTQ_DIR/sp31.bin").isFile },
                 Triple("fibo", null, "Fibo 2.0 (edits)"), Triple("moss", null, "MOSS-Image"),
                 Triple("wan", null, "Wan 2.2 (moving picture)"),
-            ).filter { ModelStore.byId(it.first).available }   // models not built for this phone's chip are left out
+            )   // every model is listed; one with nothing for this phone is shown as unavailable
         }
         var menu by remember { mutableStateOf(false) }
         Box {
@@ -509,9 +565,10 @@ fun Create(
             }
             DropdownMenu(menu, { menu = false }) {
                 choices.forEach { (id, drawing, name) ->
-                    val have = ModelStore.byId(id).installed(ctx) != null
-                    DropdownMenuItem(text = { Text(if (have) name else "$name · not downloaded") },
-                        onClick = { menu = false; onModel(id, drawing) })
+                    val st = ModelStore.byId(id)
+                    val have = st.active(ctx).installed(ctx) != null   // the version this phone uses (AI chip or graphics chip)
+                    DropdownMenuItem(text = { Text(when { !st.offered -> "$name · unavailable on this phone"; have -> name; else -> "$name · not downloaded" }) },
+                        enabled = st.offered, onClick = { menu = false; onModel(id, drawing) })
                 }
             }
         }
@@ -520,12 +577,13 @@ fun Create(
                 klein -> " It draws from plain sentences and can edit your pictures (about 4 GB)."
                 qwen -> " It draws 768×768 pictures from plain sentences and can edit your pictures (about 15 GB)."
                 fibo -> " It changes your pictures as you describe, at 768×768 (about 15 GB). It only edits."
-                moss -> " It draws 768×768 pictures from plain sentences in 8 steps (about ${if (ModelStore.MOSS.onGraphicsChip) 11 else 16} GB). It does not edit."
+                moss -> " It draws 768×768 pictures from plain sentences in 8 steps (about ${if (ModelStore.MOSS.runsOnGpu(ctx)) 11 else 16} GB). It does not edit."
                 wan -> " It turns one of your pictures into a short looping video that moves as you describe."
                 else -> ""
             })
-            val task = Installer.task(s.model)
-            Button(onClick = onDownload, enabled = !Installer.isRunning(s.model)) { Text("Download…") }
+            val dl = ModelStore.byId(s.model).active(ctx).id
+            val task = Installer.task(dl)
+            Button(onClick = onDownload, enabled = !Installer.isRunning(dl)) { Text("Download…") }
             if (task != null && task.running) {
                 Text("Downloading: ${task.status}", style = MaterialTheme.typography.bodySmall)
                 LinearProgressIndicator(progress = { task.fraction }, modifier = Modifier.fillMaxWidth())
@@ -558,14 +616,19 @@ fun Create(
                     shape = SegmentedButtonDefaults.itemShape(i, SIZE_TIERS.size)) { Text(name) }
             }
         }
+        // Klein's 8 Elite Gen 5 AI-chip build is square only: the other shapes stay on show, greyed out
+        val squareOnly = klein && kleinSquareOnly(ctx)
+        val shapeUsed = if (squareOnly) 0 else s.shape
         if (!big) SingleChoiceSegmentedButtonRow {
             SHAPES.forEachIndexed { i, name ->
-                SegmentedButton(selected = s.shape == i, onClick = { s.shape = i; onSize() }, enabled = !s.busy,
+                SegmentedButton(selected = shapeUsed == i, onClick = { s.shape = i; onSize() }, enabled = !s.busy && (!squareOnly || i == 0),
                     shape = SegmentedButtonDefaults.itemShape(i, SHAPES.size)) { Text(name, maxLines = 1) }
             }
         }
-        val (pw, ph) = if (big) 768 to 768 else pictureSize(if (klein) 0 else s.tier, s.shape)
-        Text("$pw×$ph · " + when { klein -> KLEIN_TIME
+        if (squareOnly) Text("Tall and wide are not built for this phone's AI chip yet. The graphics chip draws them.",
+            style = MaterialTheme.typography.bodySmall)
+        val (pw, ph) = if (big) 768 to 768 else pictureSize(if (klein) kleinTier(ctx) else s.tier, shapeUsed)
+        Text("$pw×$ph · " + when { klein -> if (GpuEngine.useForKlein(ctx)) KLEIN_GPU_TIME else if (Chip.kind == Chip.Kind.ELITE_GEN5) KLEIN_GEN5_TIME else KLEIN_TIME
             fibo -> if (GpuEngine.useForFibo(ctx)) FIBO_GPU_TIME else FIBO_TIME
             moss -> if (GpuEngine.useForMoss(ctx)) MOSS_GPU_TIME else MOSS_TIME
             wan -> wanTime(ctx)
@@ -615,7 +678,7 @@ fun Create(
             Text("Model: $modelLabel", style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = onChangeModel, enabled = !s.busy) { Text("Change") }
         }
-        val myTask = Installer.task(s.model)?.takeIf { it.running }
+        val myTask = Installer.task(ModelStore.byId(s.model).active(ctx).id)?.takeIf { it.running }
         if (myTask != null) {
             Text("Updating the model: ${myTask.status}", style = MaterialTheme.typography.bodySmall)
             LinearProgressIndicator(progress = { myTask.fraction }, modifier = Modifier.fillMaxWidth())
@@ -623,12 +686,32 @@ fun Create(
             Text("Model update available (%.1f GB)".format(updateBytes / 1e9), style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = onUpdate, enabled = !s.busy) { Text("Update") }
         }
+        // one tap, one job: the button turns into a spinner until the job is in the queue, so a second tap
+        // (or a double tap) cannot add it twice
+        var adding by remember { mutableStateOf(false) }
+        val addScope = rememberCoroutineScope()
         Button(onClick = {
-            enqueueFromCreate(ctx, s)
-            if (!s.seedLocked) s.seed = Random.nextLong(0, 1_000_000_000)   // the next job draws a new picture
-            s.status = "Added to the queue"
-        }, enabled = myTask == null && s.prompt.isNotBlank() && installed && !fiboNeedsPicture, modifier = Modifier.fillMaxWidth()) {
-            Text(if (myTask != null) "Add to queue (after the update)" else "Add to queue")
+            if (adding) return@Button
+            adding = true
+            addScope.launch {
+                try {
+                    val t0 = System.currentTimeMillis()
+                    val j = withContext(Dispatchers.IO) { enqueueFromCreate(ctx, s) }
+                    if (Queue.store.get(j.id) != null) {
+                        if (!s.seedLocked) s.seed = Random.nextLong(0, 1_000_000_000)   // the next job draws a new picture
+                        s.status = "Added to the queue"
+                    }
+                    kotlinx.coroutines.delay((500 - (System.currentTimeMillis() - t0)).coerceAtLeast(0))
+                } catch (e: Exception) {
+                    s.status = "Could not add to the queue: ${e.message}"
+                } finally { adding = false }
+            }
+        }, enabled = !adding && myTask == null && s.prompt.isNotBlank() && installed && !fiboNeedsPicture, modifier = Modifier.fillMaxWidth()) {
+            if (adding) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Adding…")
+            } else Text(if (myTask != null) "Add to queue (after the update)" else "Add to queue")
         }
     }
     val result: @Composable ColumnScope.() -> Unit = {
