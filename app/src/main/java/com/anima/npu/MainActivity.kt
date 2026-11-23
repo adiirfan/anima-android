@@ -681,7 +681,7 @@ fun Create(
         }
         if (!big) Text(MEMORY_MODES[s.memoryMode].second, style = MaterialTheme.typography.bodySmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Model: $modelLabel", style = MaterialTheme.typography.bodySmall)
+            Text("Model: $modelLabel", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             TextButton(onClick = onChangeModel, enabled = !s.busy) { Text("Change") }
         }
         val myTask = Installer.task(ModelStore.byId(s.model).active(ctx).id)?.takeIf { it.running }
@@ -689,7 +689,7 @@ fun Create(
             Text("Updating the model: ${myTask.status}", style = MaterialTheme.typography.bodySmall)
             LinearProgressIndicator(progress = { myTask.fraction }, modifier = Modifier.fillMaxWidth())
         } else if (updateBytes > 0) Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Model update available (%.1f GB)".format(updateBytes / 1e9), style = MaterialTheme.typography.bodySmall)
+            Text("Model update available (%.1f GB)".format(updateBytes / 1e9), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             TextButton(onClick = onUpdate, enabled = !s.busy) { Text("Update") }
         }
         // one tap, one job: the button turns into a spinner until the job is in the queue, so a second tap

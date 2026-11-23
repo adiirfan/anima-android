@@ -266,6 +266,27 @@ class ModelStore(
         return out
     }
 
+    /** This app's transfers in Android's download service that have not failed: (id, address, status). */
+    private fun ours(ctx: Context): List<Triple<Long, String, Int>> {
+        val out = ArrayList<Triple<Long, String, Int>>()
+        dm(ctx).query(DownloadManager.Query().setFilterByStatus(DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or
+            DownloadManager.STATUS_PAUSED or DownloadManager.STATUS_SUCCESSFUL)).use { c ->
+            val idCol = c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
+            val uCol = c.getColumnIndexOrThrow(DownloadManager.COLUMN_URI)
+            val sCol = c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
+            while (c.moveToNext()) out += Triple(c.getLong(idCol), c.getString(uCol) ?: "", c.getInt(sCol))
+        }
+        return out
+    }
+
+    /** Where Android saved download [id], if it says. */
+    private fun localFile(ctx: Context, id: Long): File? =
+        dm(ctx).query(DownloadManager.Query().setFilterById(id)).use { c ->
+            if (!c.moveToFirst()) return null
+            val u = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI)) ?: return null
+            Uri.parse(u).path?.let { File(it) }?.takeIf { it.isFile }
+        }
+
     private suspend fun waitFor(ctx: Context, ids: List<Long>, onBytes: (Long) -> Unit) {
         while (true) {
             val q = query(ctx, ids)
@@ -281,9 +302,12 @@ class ModelStore(
     suspend fun fetchManifest(ctx: Context): Manifest {
         modelDir(ctx).mkdirs()
         val url = manifestUrl ?: error("$title is not available for ${Chip.label}")
+        // strays from checks that overlapped: Android saves under "manifest.json-1.part" when the name is taken
+        modelDir(ctx).listFiles()?.filter { Regex("manifest\\.json-\\d+\\.part").matches(it.name) }?.forEach { it.delete() }
         val id = enqueue(ctx, url, "manifest.json.part", "$title model list")
         waitFor(ctx, listOf(id)) {}
-        val part = File(modelDir(ctx), "manifest.json.part")
+        // the file Android actually wrote (another check of the same model may have held the usual name)
+        val part = localFile(ctx, id) ?: File(modelDir(ctx), "manifest.json.part")
         val m = parse(part.readText())
         part.renameTo(manifestFile(ctx))
         return m
@@ -316,7 +340,15 @@ class ModelStore(
             !(have.length() == f.size && sameSha && (!switching || f in m.shared))
         }
         val total = need.sumOf { it.size }
-        val ids = need.map { enqueue(ctx, m.base + it.path, it.name + ".part", "$title: ${it.name}") }
+        // Android's download service keeps going when the app is closed or updated: a transfer of the same file that
+        // is still alive (started before the app restarted, by this build or an older one) is picked up, not redone
+        val live = ours(ctx)
+        val ids = need.map { f ->
+            val url = m.base + f.path
+            val part = File(dir, f.name + ".part")
+            live.firstOrNull { (_, u, st) -> u == url && (st != DownloadManager.STATUS_SUCCESSFUL || part.length() == f.size) }?.first
+                ?: enqueue(ctx, url, f.name + ".part", "$title: ${f.name}")
+        }
         try {
             waitFor(ctx, ids) { progress(it, total, "Downloading") }
         } catch (e: Exception) {
