@@ -42,7 +42,7 @@ fun SettingsScreen(onSetup: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Models", style = MaterialTheme.typography.titleSmall)
-        if (!Chip.supported) Text("${Chip.label}: no AI chip support, models run on the graphics chip.",
+        if (!Chip.supported && !Chip.animaOnly) Text("${Chip.label}: no AI chip support, models run on the graphics chip.",
             style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = onSetup) { Text("Model Management") }
 

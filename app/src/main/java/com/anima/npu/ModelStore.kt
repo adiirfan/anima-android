@@ -28,6 +28,9 @@ class ModelStore(
     /** The same downloaded files run on either chip (the chat models: llama.cpp reads them on the AI chip or the
      *  graphics chip), so there is no separate graphics-chip download. */
     val sameFilesOnGpu: Boolean = false,
+    /** The file lists for the Snapdragon 8 Gen 3 (v75) and 8 Gen 2 (v73), for the models built for them (Anima). */
+    private val gen3Url: String? = null,
+    private val gen2Url: String? = null,
 ) {
     /**
      * Where this build's file list is, or null when there is none for this phone: the AI-chip build of the phone's
@@ -37,6 +40,9 @@ class ModelStore(
         get() = if (onGpu) gpuUrl else when (Chip.kind) {
             Chip.Kind.ELITE -> eliteUrl
             Chip.Kind.ELITE_GEN5 -> gen5Url
+            // the chat models' llama.cpp has no AI-chip support for these chips: their files run on the graphics chip
+            Chip.Kind.GEN3 -> if (sameFilesOnGpu) eliteUrl else gen3Url
+            Chip.Kind.GEN2 -> if (sameFilesOnGpu) eliteUrl else gen2Url
             Chip.Kind.UNSUPPORTED -> if (sameFilesOnGpu) eliteUrl else null
         }
 
@@ -55,7 +61,7 @@ class ModelStore(
     }
 
     /** The AI-chip build exists for this phone (shown as a choice only then). */
-    val aiChip get() = !onGpu && manifestUrl != null && !(sameFilesOnGpu && Chip.kind == Chip.Kind.UNSUPPORTED)
+    val aiChip get() = !onGpu && manifestUrl != null && !(sameFilesOnGpu && !Chip.supported)
 
     /** This phone can run the model one way or the other. */
     val offered get() = available || gpu?.available == true
@@ -79,7 +85,7 @@ class ModelStore(
     }
 
     /** The build that draws: this one or its graphics-chip twin. */
-    fun active(ctx: Context): ModelStore = if (runsOnGpu(ctx)) gpu!! else this
+    fun active(ctx: Context): ModelStore = if (runsOnGpu(ctx)) gpu ?: this else this   // chat models: same files, no twin
 
     companion object {
         private const val HF = "https://huggingface.co/sebekblessing"
@@ -90,7 +96,8 @@ class ModelStore(
             "Anima is licensed for non-commercial use (CircleStone Labs Non-Commercial License). Pictures you make may be used for anything.",
             // multi-size + guide set; manifest.json stays for older app builds
             "$HF/anima-qnn-8elite/resolve/main/manifest2.json", "$HF/anima-qnn-8elite-gen5/resolve/main/manifest2.json", "",
-            "$HF/anima-gpu/resolve/main/manifest.json")
+            "$HF/anima-gpu/resolve/main/manifest.json",
+            gen3Url = "$HF/anima-qnn-8gen3/resolve/main/manifest2.json", gen2Url = "$HF/anima-qnn-8gen2/resolve/main/manifest2.json")
         val KLEIN = ModelStore(
             "klein", "FLUX.2 klein 4B",
             "FLUX.2 [klein] 4B is released by Black Forest Labs under the Apache 2.0 licence.",

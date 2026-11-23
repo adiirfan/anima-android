@@ -19,6 +19,37 @@ __constant sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK
 #define EPI 0
 #endif
 
+// 8 inputs x 4 outputs: x (half8) against w0..w3 (outputs 4og..+3 at inputs 2k, 2k+1). Default: summed in half
+// precision, then added to the fp32 total. Old chips (Adreno 630, 2018 driver) flush tiny half products to zero and
+// lose precision over 8-product half sums: 5% off after one step. ACC32=4 SCL=64 fixes both (0.1%, ~20% slower);
+// SCL 256 already overflows on Anima. ACC32=1: every product in fp32, exact but 8x slower there.
+#if ACC32 == 4   // inputs arrive scaled up by SCL (XS, at load: keeps small products out of the range old chips flush
+                 // to zero); pairs of products summed in fp16, pairs in fp32; the totals are scaled back once (UNS)
+#define XS(v) ((v) * (half)SCL)
+#define UNS (1.0f / SCL)
+#define DOT8(x, w0, w1, w2, w3) ( \
+    convert_float4(mad((x).s1, (w0).hi, (x).s0 * (w0).lo)) + convert_float4(mad((x).s3, (w1).hi, (x).s2 * (w1).lo)) + \
+    convert_float4(mad((x).s5, (w2).hi, (x).s4 * (w2).lo)) + convert_float4(mad((x).s7, (w3).hi, (x).s6 * (w3).lo)))
+#elif ACC32
+#define DOT8(x, w0, w1, w2, w3) ( \
+    (float)(x).s0 * convert_float4((w0).lo) + (float)(x).s1 * convert_float4((w0).hi) + \
+    (float)(x).s2 * convert_float4((w1).lo) + (float)(x).s3 * convert_float4((w1).hi) + \
+    (float)(x).s4 * convert_float4((w2).lo) + (float)(x).s5 * convert_float4((w2).hi) + \
+    (float)(x).s6 * convert_float4((w3).lo) + (float)(x).s7 * convert_float4((w3).hi))
+#else
+inline float4 DOT8(half8 x, half8 w0, half8 w1, half8 w2, half8 w3) {
+    half4 t = x.s0 * w0.lo;
+    t = mad(x.s1, w0.hi, t); t = mad(x.s2, w1.lo, t); t = mad(x.s3, w1.hi, t);
+    t = mad(x.s4, w2.lo, t); t = mad(x.s5, w2.hi, t); t = mad(x.s6, w3.lo, t);
+    t = mad(x.s7, w3.hi, t);
+    return convert_float4(t);
+}
+#endif
+#ifndef XS
+#define XS(v) (v)
+#define UNS 1.0f
+#endif
+
 // Y = X W^T for a batch of matrices (get_global_id(2) = b). Each work item: TN tokens x 4*TM outputs, fp32 sums
 // of fp16 products taken 8 inputs at a time.
 // EPI 0: Y (X layout) = r          EPI 1: Y = gelu(r)
@@ -47,7 +78,7 @@ __kernel void gemm(__read_only image2d_t X, __read_only image2d_t W, int N, int 
     for (int k8 = 0; k8 < K / 8; k8++) {
         half8 x[TN];
 #pragma unroll
-        for (int i = 0; i < TN; i++) x[i] = LD8(X, n0 + i, xr + k8);
+        for (int i = 0; i < TN; i++) x[i] = XS(LD8(X, n0 + i, xr + k8));
 #pragma unroll
         for (int j = 0; j < TM; j++) {
             const int wy = wr + k8 * 4;
@@ -55,14 +86,16 @@ __kernel void gemm(__read_only image2d_t X, __read_only image2d_t W, int N, int 
                         w3 = LD8(W, wx + j, wy + 3);
 #pragma unroll
             for (int i = 0; i < TN; i++) {
-                half4 t = x[i].s0 * w0.lo;
-                t = mad(x[i].s1, w0.hi, t); t = mad(x[i].s2, w1.lo, t); t = mad(x[i].s3, w1.hi, t);
-                t = mad(x[i].s4, w2.lo, t); t = mad(x[i].s5, w2.hi, t); t = mad(x[i].s6, w3.lo, t);
-                t = mad(x[i].s7, w3.hi, t);
-                r[i][j] += convert_float4(t);
+                r[i][j] += DOT8(x[i], w0, w1, w2, w3);
             }
         }
     }
+#if ACC32 == 4
+#pragma unroll
+    for (int i = 0; i < TN; i++)
+#pragma unroll
+        for (int j = 0; j < TM; j++) r[i][j] *= UNS;
+#endif
 #if EPI < 2
     const int yr = (b + yb0) * yby + og0 / 2;
 #pragma unroll
@@ -140,22 +173,24 @@ __kernel void gemml(__read_only image2d_t X, __read_only image2d_t W, int N, int
         for (int k8l = 0; k8l < kn; k8l++) {
             half8 x[TNI];
 #pragma unroll
-            for (int i = 0; i < TNI; i++) x[i] = LD8(X, n0 + i, xr + kc + k8l);
+            for (int i = 0; i < TNI; i++) x[i] = XS(LD8(X, n0 + i, xr + kc + k8l));
 #pragma unroll
             for (int g = 0; g < G; g++) {
                 const int bi = (k8l * G + g) * 4;
                 const half8 w0 = wl[bi], w1 = wl[bi + 1], w2 = wl[bi + 2], w3 = wl[bi + 3];
 #pragma unroll
                 for (int i = 0; i < TNI; i++) {
-                    half4 t = x[i].s0 * w0.lo;
-                    t = mad(x[i].s1, w0.hi, t); t = mad(x[i].s2, w1.lo, t); t = mad(x[i].s3, w1.hi, t);
-                    t = mad(x[i].s4, w2.lo, t); t = mad(x[i].s5, w2.hi, t); t = mad(x[i].s6, w3.lo, t);
-                    t = mad(x[i].s7, w3.hi, t);
-                    r[i][g] += convert_float4(t);
+                    r[i][g] += DOT8(x[i], w0, w1, w2, w3);
                 }
             }
         }
     }
+#if ACC32 == 4
+#pragma unroll
+    for (int i = 0; i < TNI; i++)
+#pragma unroll
+        for (int g = 0; g < G; g++) r[i][g] *= UNS;
+#endif
 #pragma unroll
     for (int i = 0; i < TNI; i++) {
         const int n = n0 + i;
@@ -244,6 +279,9 @@ __kernel void lnmod2(__global const float4 *res, __global const float4 *sh, __gl
 #ifndef QKFULL
 #define QKFULL 0
 #endif
+#ifndef KVR
+#define KVR 1   // query heads per key / value head (Krea: 48 queries share 12 key / value heads)
+#endif
 __kernel void attnprep(__read_only image2d_t In, int N, int qr, int kr, int vr,
                        __global const float *qw, __global const float *kw, float qscale,
                        __global const float *P, __global const float *Q,
@@ -252,7 +290,7 @@ __kernel void attnprep(__read_only image2d_t In, int N, int qr, int kr, int vr,
                        , __global const float *rq, __global const float *rkf   // whole-width 1/rms per token
 #endif
                        ) {
-    const int n0 = get_global_id(0) * 4, h = get_global_id(1);
+    const int n0 = get_global_id(0) * 4, h = get_global_id(1), hk = h / KVR;
     if (n0 >= N) return;
 #if QKFULL
     qw += h * 128; kw += h * 128;
@@ -282,7 +320,7 @@ __kernel void attnprep(__read_only image2d_t In, int N, int qr, int kr, int vr,
     float rk[4];
     for (int t = 0; t < 4; t++) {
         float ss = 0;
-        for (int c = 0; c < 16; c++) { float8 a = convert_float8(LD8(In, n0 + t, kr + h * 16 + c)); ss += dot(a.lo, a.lo) + dot(a.hi, a.hi); }
+        for (int c = 0; c < 16; c++) { float8 a = convert_float8(LD8(In, n0 + t, kr + hk * 16 + c)); ss += dot(a.lo, a.lo) + dot(a.hi, a.hi); }
 #if QKFULL
         rk[t] = rkf[min(n0 + t, N - 1)];
 #else
@@ -293,10 +331,10 @@ __kernel void attnprep(__read_only image2d_t In, int N, int qr, int kr, int vr,
         float8 a[4];
         for (int t = 0; t < 4; t++) {
             const int n = min(n0 + t, N - 1);
-            a[t] = convert_float8(LD8(In, n0 + t, kr + h * 16 + c)) * vload8(c, kw) * rk[t];
+            a[t] = convert_float8(LD8(In, n0 + t, kr + hk * 16 + c)) * vload8(c, kw) * rk[t];
 #if ROPE
             const int cs = c ^ 8;
-            float8 p = convert_float8(LD8(In, n0 + t, kr + h * 16 + cs)) * vload8(cs, kw) * rk[t];
+            float8 p = convert_float8(LD8(In, n0 + t, kr + hk * 16 + cs)) * vload8(cs, kw) * rk[t];
             a[t] = a[t] * vload8(c, P + n * 128) + p * vload8(c, Q + n * 128);
 #endif
         }
@@ -309,8 +347,8 @@ __kernel void attnprep(__read_only image2d_t In, int N, int qr, int kr, int vr,
 #endif
 #if DO_V
     for (int c = 0; c < 16; c++) {
-        half8 a0 = LD8(In, n0, vr + h * 16 + c), a1 = LD8(In, n0 + 1, vr + h * 16 + c);
-        half8 a2 = LD8(In, n0 + 2, vr + h * 16 + c), a3 = LD8(In, n0 + 3, vr + h * 16 + c);
+        half8 a0 = LD8(In, n0, vr + hk * 16 + c), a1 = LD8(In, n0 + 1, vr + hk * 16 + c);
+        half8 a2 = LD8(In, n0 + 2, vr + hk * 16 + c), a3 = LD8(In, n0 + 3, vr + hk * 16 + c);
         ST8(Vo, h * 32 + c * 2, n0 / 2, (half8)(a0.lo, a1.lo));
         ST8(Vo, h * 32 + c * 2 + 1, n0 / 2, (half8)(a0.hi, a1.hi));
         ST8(Vo, h * 32 + c * 2, n0 / 2 + 1, (half8)(a2.lo, a3.lo));
@@ -508,7 +546,7 @@ __kernel void rowrms(__read_only image2d_t In, int N, int c0, int C8, __global f
     if (l == 0 && n < N) out[n] = rsqrt(red[0] / (C8 * 8) + 1e-6f);
 }
 
-// y[m] = W[m] . act(x) + add[m]   (W fp16 row-major [M][K]); act = silu when SILU
+// y[m] = W[m] . act(x) + add[m]   (W fp16 row-major [M][K]); act: silu = 1 SiLU, 2 GELU (tanh), 0 none
 __kernel void gemv(__global const half *W, __global const float *x, __global const float *add,
                    __global float *y, int M, int K, int silu) {
     const int m = get_global_id(0);
@@ -517,10 +555,66 @@ __kernel void gemv(__global const half *W, __global const float *x, __global con
     const __global half *w = W + (size_t)m * K;
     for (int k = 0; k < K; k += 8) {
         float8 a = vload8(0, x + k);
-        if (silu) a = a / (1.0f + exp(-a));
+        if (silu == 1) a = a / (1.0f + exp(-a));
+        else if (silu == 2) a = 0.5f * a * (1.0f + tanh(0.7978845608f * (a + 0.044715f * a * a * a)));   // GELU (tanh)
         s += dot(convert_float8(vload8(0, w + k)).lo, a.lo) + dot(convert_float8(vload8(0, w + k)).hi, a.hi);
     }
     y[m] = s + (add ? add[m] : 0.0f);
+}
+
+// Krea's text fusion: attention inside groups of G consecutive rows (the 12 reader layers of one prompt token, or all
+// prompt rows), q / k rms-normed with qn / kn (eps 1e-5), no rope. In: X layout, q / k / v at texel columns qr / kr /
+// vr, 16 texels (128 channels) per head. One work item per (row, head): launch (n1, heads).
+__kernel void grpattn(__read_only image2d_t In, int n1, int grp, int qr, int kr, int vr,
+                      __global const float *qw, __global const float *kw, __write_only image2d_t O) {
+    const int n = get_global_id(0), h = get_global_id(1);
+    if (n >= n1) return;
+    const int g0 = n / grp * grp, g1 = min(g0 + grp, n1);
+    float8 qv[16], acc[16];
+    float ss = 0;
+    for (int c = 0; c < 16; c++) { qv[c] = convert_float8(LD8(In, n, qr + h * 16 + c)); ss += dot(qv[c].lo, qv[c].lo) + dot(qv[c].hi, qv[c].hi); }
+    const float rq = rsqrt(ss / 128 + 1e-5f) * 0.08838834764f;   // and 1 / sqrt(128)
+    for (int c = 0; c < 16; c++) { qv[c] *= vload8(c, qw) * rq; acc[c] = (float8)0.0f; }
+    float m = -INFINITY, l = 0;
+    for (int j = g0; j < g1; j++) {
+        float kk = 0, s = 0;
+        for (int c = 0; c < 16; c++) {
+            const float8 a = convert_float8(LD8(In, j, kr + h * 16 + c));
+            kk += dot(a.lo, a.lo) + dot(a.hi, a.hi);
+            const float8 b = a * vload8(c, kw) * qv[c];
+            s += b.s0 + b.s1 + b.s2 + b.s3 + b.s4 + b.s5 + b.s6 + b.s7;
+        }
+        s *= rsqrt(kk / 128 + 1e-5f);
+        const float mn = fmax(m, s), corr = exp(m - mn), p = exp(s - mn);
+        l = l * corr + p;
+        for (int c = 0; c < 16; c++) acc[c] = acc[c] * corr + p * convert_float8(LD8(In, j, vr + h * 16 + c));
+        m = mn;
+    }
+    for (int c = 0; c < 16; c++) ST8(O, n, h * 16 + c, convert_half8(acc[c] / l));
+}
+// Krea's text MLP: Z = gelu_tanh(Y + b), X layout. launch (N, C / 8)
+__kernel void biasgelu(__read_only image2d_t Y, __global const float *b, int N, __write_only image2d_t Z) {
+    const int n = get_global_id(0), c = get_global_id(1);
+    if (n >= N) return;
+    const float8 a = convert_float8(LD8(Y, n, c)) + vload8(c, b);
+    ST8(Z, n, c, convert_half8(0.5f * a * (1.0f + tanh(0.7978845608f * (a + 0.044715f * a * a * a)))));
+}
+// Krea: the attention output times sigmoid(gate), the gate at texel column gc of G (both X layout, texel (n, c8)).
+// launch (N, Dm / 8)
+__kernel void sgate(__read_only image2d_t O, __read_only image2d_t Gt, int gc, int N, __write_only image2d_t Y) {
+    const int n = get_global_id(0), c = get_global_id(1);
+    if (n >= N) return;
+    const float8 o = convert_float8(LD8(O, n, c)), g = convert_float8(LD8(Gt, n, gc + c));
+    ST8(Y, n, c, convert_half8(o / (1.0f + exp(-g))));
+}
+
+// SwiGLU after a 16-bit multiply (chips without the byte dot product): Y holds the stored rows [gate 8][up 8] per 16
+// outputs (X layout, texel (n, c8)), Z gets silu(gate) * up. Launch (N, M / 16) for M stored rows.
+__kernel void swiglu16(__read_only image2d_t Y, int N, __write_only image2d_t Z) {
+    const int n = get_global_id(0), c = get_global_id(1);
+    if (n >= N) return;
+    const float8 g = convert_float8(LD8(Y, n, 2 * c)), u = convert_float8(LD8(Y, n, 2 * c + 1));
+    ST8(Z, n, c, convert_half8(g / (1.0f + exp(-g)) * u));
 }
 
 // res (channel groups first: res[c * N + n]) += rms_norm(A[n]) * w, A an X-layout image (n, c8) of Dm channels.
@@ -557,6 +651,9 @@ __kernel void rmsadd(__read_only image2d_t A, __global float4 *res, __global con
 // output, MLP hidden). SRC 1: input is layernorm(res) * (1 + sc) + sh (the residual stream). Launch (64, N).
 #ifndef QT
 #define QT 4
+#endif
+#ifndef HOUT
+#define HOUT 0
 #endif
 __kernel void rotq(
 #if SRC == 1
@@ -620,6 +717,13 @@ __kernel void rotq(
         }
         v = vload4(l, buf) * (1.0f / 16.0f);
 #endif
+#if HOUT   // A16 (see deq8): the rotated inputs stay fp16, texel (n, k8)
+        barrier(CLK_LOCAL_MEM_FENCE);
+        vstore4(v, l, buf);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if ((l & 1) == 0 && n0 < N) ST8(Q, n, g * 32 + l / 2, convert_half8(vload8(l / 2, buf)));
+        barrier(CLK_LOCAL_MEM_FENCE);
+#else
         red[l] = fmax(fmax(fabs(v.x), fabs(v.y)), fmax(fabs(v.z), fabs(v.w)));
         barrier(CLK_LOCAL_MEM_FENCE);
         const int b0 = (l / LB) * LB;
@@ -630,13 +734,42 @@ __kernel void rotq(
         barrier(CLK_LOCAL_MEM_FENCE);
         if ((l & 3) == 0 && n0 < N) write_imageui(Q, (int2)(n, g * 16 + l / 4), (uint4)(u[l], u[l + 1], u[l + 2], u[l + 3]));
         barrier(CLK_LOCAL_MEM_FENCE);
+#endif
     }
+}
+
+// A16 (chips without the byte dot product): a layer's 8-bit weights turned into the fp16 W layout just before it runs,
+// so the tuned fp16 multiply does the work (rotq HOUT gives it fp16 inputs). One item per 4 outputs x 16 inputs.
+// W8 texel (o - part*MW, part*(K/16) + k16) = 16 x int8 inputs of output o, scale sw[o * K/GS + k/GS];
+// Wp texel (og, k2) = outputs 4og..+3 at input 2k2, then at 2k2 + 1. Launch (M/4, K/16).
+inline uint4 dq4(uint4 u, int k16) { return (k16 & 1) ? (u & (uint4)0xF0F0F0F0u) : ((u << 4) & (uint4)0xF0F0F0F0u); }
+__kernel void deq8(__read_only image2d_t W8, __global const float *sw, int M, int K, __write_only image2d_t Wp) {
+    const int og = get_global_id(0), k16 = get_global_id(1);
+    if (og * 4 >= M || k16 * 16 >= K) return;
+    const int MW = get_image_width(W8), NB = K / GS, o = og * 4, sb = k16 * 16 / GS;
+#if defined(W4) && W4   // 4-bit table (texel (o, k32): inputs 32b + j low half, 32b + 16 + j high half), read as gemmq does
+#define DQR(oj) dq4(read_imageui(W8, smp, (int2)((oj) - ((oj) / MW) * MW, ((oj) / MW) * (K / 32) + k16 / 2)), k16)
+#else
+#define DQR(oj) read_imageui(W8, smp, (int2)((oj) - ((oj) / MW) * MW, ((oj) / MW) * (K / 16) + k16))
+#endif
+#define DQL(j) convert_half16(convert_float16(as_char16(DQR(o + j))) * sw[(o + j) * NB + sb])
+    const half16 h0 = DQL(0), h1 = DQL(1), h2 = DQL(2), h3 = DQL(3);
+#define DQP(p, a, b) ST8(Wp, og, k16 * 8 + p, (half8)(h0.a, h1.a, h2.a, h3.a, h0.b, h1.b, h2.b, h3.b))
+    DQP(0, s0, s1); DQP(1, s2, s3); DQP(2, s4, s5); DQP(3, s6, s7);
+    DQP(4, s8, s9); DQP(5, sa, sb); DQP(6, sc, sd); DQP(7, se, sf);
+#undef DQL
+#undef DQR
+#undef DQP
 }
 
 // Integer multiply: X (n, k16) int8 x W (o, k16) int8 -> int32 per block of GS inputs, scaled into fp32 totals.
 // A work group of QWG items shares QOB outputs' weights through local memory; each item QTN tokens x QOB outputs.
 // Launch: global (ceil(N/QTN) rounded to QWG, M/QOB), local (QWG, 1). Epilogues as gemm (EPI 0..3).
+#ifdef cl_khr_integer_dot_product
 #pragma OPENCL EXTENSION cl_khr_integer_dot_product : enable
+#elif !defined(NO_IDP)
+#define NO_IDP 1   // older drivers (e.g. Adreno 630, 2018) do not have it at all: the pragma alone fails the build
+#endif
 #if NO_IDP   // chips without the 4 x int8 dot product (the computer's Radeon, for testing): plain arithmetic
 inline int dot_acc_sat_4x8packed_ss_int(uint a, uint b, int acc) {
     const char4 x = as_char4(a), y = as_char4(b);
@@ -656,7 +789,7 @@ inline int dot_acc_sat_4x8packed_ss_int(uint a, uint b, int acc) {
 #define W4 0
 #endif
 #ifndef QKC
-#define QKC 128
+#define QKC (GS > 128 ? GS : 128)   // inputs staged per pass: whole scale blocks
 #endif
 // EPI 4: SwiGLU. The weight rows are stored [gate 8][up 8] per 16 outputs, so each item can finish
 // silu(gate) * up itself and write M/2 outputs.
@@ -989,7 +1122,7 @@ __kernel void gemmlsm(__read_only image2d_t X, __read_only image2d_t W, int N, i
                 }
                 const float8 p = native_exp(s - m[i]);
                 l[i] += dot(p.lo, (float4)1) + dot(p.hi, (float4)1);
-                x[i] = convert_half8(p);
+                x[i] = XS(convert_half8(p));
             }
 #pragma unroll
             for (int g = 0; g < G; g++) {
@@ -997,11 +1130,7 @@ __kernel void gemmlsm(__read_only image2d_t X, __read_only image2d_t W, int N, i
                 const half8 w0 = wl[bi], w1 = wl[bi + 1], w2 = wl[bi + 2], w3 = wl[bi + 3];
 #pragma unroll
                 for (int i = 0; i < TNI; i++) {
-                    half4 t = x[i].s0 * w0.lo;
-                    t = mad(x[i].s1, w0.hi, t); t = mad(x[i].s2, w1.lo, t); t = mad(x[i].s3, w1.hi, t);
-                    t = mad(x[i].s4, w2.lo, t); t = mad(x[i].s5, w2.hi, t); t = mad(x[i].s6, w3.lo, t);
-                    t = mad(x[i].s7, w3.hi, t);
-                    r[i][g] += convert_float4(t);
+                    r[i][g] += DOT8(x[i], w0, w1, w2, w3);
                 }
             }
         }
@@ -1010,7 +1139,7 @@ __kernel void gemmlsm(__read_only image2d_t X, __read_only image2d_t W, int N, i
     for (int i = 0; i < TNI; i++) {
         const int n = n0 + i;
         if (n >= N) break;
-        const float inv = 1.0f / l[i];
+        const float inv = UNS / l[i];
 #pragma unroll
         for (int g = 0; g < G; g += 2) {
             const float8 v = (float8)(r[i][g], r[i][g + 1]) * inv;

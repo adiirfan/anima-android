@@ -82,7 +82,9 @@ class QueueService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(ID_WORK, working("Getting ready…", 0, 0), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        if (android.os.Build.VERSION.SDK_INT >= 29)
+            startForeground(ID_WORK, working("Getting ready…", 0, 0), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        else startForeground(ID_WORK, working("Getting ready…", 0, 0))   // Android 9: no service types yet
         if (intent?.action == ACTION_CANCEL) {
             Queue.store.all().filter { it.state == JobState.WAITING }
                 .forEach { w -> Queue.store.update(w.id) { it.copy(state = JobState.CANCELLED) } }
@@ -141,6 +143,7 @@ class QueueService : Service() {
                         finished(j, r.bitmap, r.entry.uri.toString())
                     }
                 } catch (e: Exception) {
+                    Log.w("queue", "job ${j.id} (${j.model}) failed", e)
                     Queue.store.update(j.id) { it.copy(state = JobState.FAILED, error = e.message ?: "failed") }
                 } finally {
                     if (wl.isHeld) wl.release()

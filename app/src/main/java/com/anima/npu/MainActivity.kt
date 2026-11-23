@@ -269,8 +269,14 @@ class MainActivity : ComponentActivity() {
         Engines.init(this, if (memOverride >= 0) memOverride else if (selfTest) 1 else -1, loadOpts)
         Queue.init(this)
         openUri.value = intent.getStringExtra("openUri")
-        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
-            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        // notifications are a permission from Android 13; saving to Pictures/Anima needs storage access up to Android 9
+        val ask = buildList {
+            if (android.os.Build.VERSION.SDK_INT >= 33) add(android.Manifest.permission.POST_NOTIFICATIONS)
+            if (android.os.Build.VERSION.SDK_INT < 29) {   // both: Android 9 opens shared storage only with read granted too
+                add(android.Manifest.permission.READ_EXTERNAL_STORAGE); add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }.filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (ask.isNotEmpty()) requestPermissions(ask.toTypedArray(), 1)
         // jobs left waiting (or interrupted) when the app was last closed
         if (!selfTest && Queue.store.waitingCount() > 0) QueueService.kick(this)
         // test builds: `am start ... --es chat "<message>" [--ez think true] [--es conv <id>] [--es image <file in

@@ -100,7 +100,7 @@ object LocalLing {
         // llama.cpp asks for the graphics chip's library, which lives with the phone's firmware, whether or not it is
         // used: without these folders on the path the program does not start at all. The system folder goes before
         // the vendor's: the vendor's older libc++.so lacks symbols the Samsung's (Android 16) system liblog.so needs.
-        pb.environment()["LD_LIBRARY_PATH"] = "$libs:/system/lib64:/vendor/lib64:/system/vendor/lib64"
+        NativeLibs.apply(ctx, pb.environment())
         pb.environment()["ADSP_LIBRARY_PATH"] = libs
         val slots = expertSlots(ctx)
         if (slots > 0 && !onGpu) {   // keeping only some experts is the AI chip's: the graphics chip holds them all

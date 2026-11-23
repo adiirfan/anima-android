@@ -63,14 +63,16 @@ object GpuEngine {
 
     /** Runs the engine once; [line] sees every line it prints. Throws with its last lines when it fails. */
     private fun run(ctx: Context, args: List<String>, env: Map<String, String>, line: (String) -> Unit = {}) =
-        runProgram(ctx, LIB, args, env, line)
+        // the engine's third argument is how many extra timed repeats to run after the real one (default 1, for
+        // benchmarks): the app never wants them, and for the decoders and encoders a repeat doubled their time
+        runProgram(ctx, LIB, if (args.size == 2) args + "0" else args, env, line)
 
     /** Runs [lib] (a program in the app's library folder) once, in the engine's folder. */
     private fun runProgram(ctx: Context, lib: String, args: List<String>, env: Map<String, String>, line: (String) -> Unit = {}) {
         val home = home(ctx)
         val libs = ctx.applicationInfo.nativeLibraryDir
         val pb = ProcessBuilder(listOf(File(libs, lib).absolutePath) + args).directory(home).redirectErrorStream(true)
-        pb.environment()["LD_LIBRARY_PATH"] = "$libs:/system/lib64:/vendor/lib64:/system/vendor/lib64"
+        NativeLibs.apply(ctx, pb.environment())
         pb.environment()["KCACHE"] = File(home, "kcache").absolutePath   // built chip programs kept between runs
         // the prompt readers on phones with less than 14 GB: no private copy of the reader's weights (4 to 5 GB for
         // the big readers), they are used straight from the file instead; slower on a long prompt

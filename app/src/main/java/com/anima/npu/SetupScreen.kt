@@ -71,7 +71,9 @@ fun SetupScreen(firstRun: Boolean, onDone: () -> Unit) {
             Button(onClick = onDone) { Text("Continue") }
             return@Column
         }
-        Text(if (Chip.supported) "Choose what to download. Everything runs on this phone's neural unit (${Chip.label}); " +
+        Text(if (Chip.animaOnly) "Choose what to download. Anima runs on this phone's neural unit (${Chip.label}); the " +
+                "other models run on its graphics chip, more slowly. Nothing is sent anywhere after the download."
+            else if (Chip.supported) "Choose what to download. Everything runs on this phone's neural unit (${Chip.label}); " +
                 "nothing is sent anywhere after the download. You can add or remove models later in Settings."
             else "This phone has ${Chip.label}, which has no AI chip the app supports. MOSS-Image (new pictures) and " +
                 "Fibo (picture edits) can still run on its graphics chip, more slowly: several minutes a picture. " +
@@ -83,7 +85,7 @@ fun SetupScreen(firstRun: Boolean, onDone: () -> Unit) {
         val manifests = remember { mutableStateMapOf<String, ModelStore.Manifest>() }
         var listStatus by remember { mutableStateOf("Getting the model lists…") }
         // nothing ticked until the user picks; Anima is the one most people want, so it starts ticked
-        val chosen = remember { mutableStateMapOf(ModelStore.byId(if (Chip.supported) "anima" else "moss").active(ctx).id to true) }
+        val chosen = remember { mutableStateMapOf(ModelStore.byId(if (Chip.supported || Chip.animaOnly) "anima" else "moss").active(ctx).id to true) }
         var started by remember { mutableStateOf(Installer.tasks.isNotEmpty()) }
 
         LaunchedEffect(Unit) {
