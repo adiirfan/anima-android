@@ -186,7 +186,7 @@ val BIG_MODELS = setOf("qwen", "fibo", "moss", "wan")
 const val WAN_TIME = "17 frames, a looping video · about 2.5 min on the iQOO 13"
 const val WAN_LONG_TIME = "49 frames, a 3-second video · about 3.5 min"   // the Fold, 2026-11-18 (206 s)
 const val MOSS_GPU_TIME = "8 steps · about 4 min on the graphics chip"   // the Fold in the app, 2026-11-19 (232 s)
-const val FIBO_GPU_TIME = "edits only · 4 steps · about 9 min on the graphics chip"   // the Fold in the app, 2026-11-19 (532 s)
+const val FIBO_GPU_TIME = "edits only · 4 steps · about 6 min on the graphics chip"   // the Fold in the app, 2026-11-24: 4-bit file on OpenCL, 331 s of steps
 
 /** The clip length the phone's Wan files make: frames.txt says 49 for the 3-second set, none means 17. */
 fun wanTime(ctx: android.content.Context) =
@@ -256,9 +256,14 @@ class MainActivity : ComponentActivity() {
         }
         // the old Settings switch "Draw MOSS and Fibo with the graphics chip" becomes each model's own choice
         getSharedPreferences("anima", MODE_PRIVATE).let { p ->
-            if (p.contains("gpuEngine")) {
-                if (p.getBoolean("gpuEngine", false)) listOf(ModelStore.MOSS, ModelStore.FIBO).forEach { it.setRunsOnGpu(this, true) }
-                p.edit().remove("gpuEngine").apply()
+            // only the old on/off value (a test build briefly kept the engine choice, a number, under this name)
+            when (val old = p.all["gpuEngine"]) {
+                null -> {}
+                is Boolean -> {
+                    if (old) listOf(ModelStore.MOSS, ModelStore.FIBO).forEach { it.setRunsOnGpu(this, true) }
+                    p.edit().remove("gpuEngine").apply()
+                }
+                else -> p.edit().remove("gpuEngine").apply()
             }
         }
         val libDir = applicationInfo.nativeLibraryDir

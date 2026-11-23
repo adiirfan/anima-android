@@ -96,34 +96,36 @@ class ModelStore(
             "Anima is licensed for non-commercial use (CircleStone Labs Non-Commercial License). Pictures you make may be used for anything.",
             // multi-size + guide set; manifest.json stays for older app builds
             "$HF/anima-qnn-8elite/resolve/main/manifest2.json", "$HF/anima-qnn-8elite-gen5/resolve/main/manifest2.json", "",
-            "$HF/anima-gpu/resolve/main/manifest.json",
+            // manifest2: the drawing file in scale blocks of 256 (the Vulkan engine's fast layout); manifest.json keeps
+            // the blocks-of-64 file for older app builds, whose graphics engine reads only that
+            "$HF/anima-gpu/resolve/main/manifest2.json",
             gen3Url = "$HF/anima-qnn-8gen3/resolve/main/manifest2.json", gen2Url = "$HF/anima-qnn-8gen2/resolve/main/manifest2.json")
         val KLEIN = ModelStore(
             "klein", "FLUX.2 klein 4B",
             "FLUX.2 [klein] 4B is released by Black Forest Labs under the Apache 2.0 licence.",
             "$HF/klein-4b-qnn-8elite/resolve/main/manifest.json", "$HF/klein-4b-qnn-8elite-gen5/resolve/main/manifest.json", "klein/",
-            "$HF/klein-4b-gpu/resolve/main/manifest.json")
+            "$HF/klein-4b-gpu/resolve/main/manifest2.json")   // manifest2: the Vulkan layout (256-input blocks), as Anima
         val QWEN = ModelStore(
             "qwen", "Qwen-Image 2.1",
             "Qwen-Image 2.1 is released under the Qwen Research License: non-commercial use only. Built with Qwen.",
             "$HF/qwen-image-2.1-qnn-8elite/resolve/main/manifest.json", "$HF/qwen-image-2.1-qnn-8elite-gen5/resolve/main/manifest.json", "qwen/",
-            "$HF/qwen-image-2.1-gpu/resolve/main/manifest.json")
+            "$HF/qwen-image-2.1-gpu/resolve/main/manifest2.json")
         val FIBO = ModelStore(
             "fibo", "Fibo 2.0 edit",
             "Fibo 2.0 is released by Bria under CC BY-NC 4.0: non-commercial use only.",
             "$HF/fibo-qnn-8elite/resolve/main/manifest.json", "$HF/fibo-qnn-8elite-gen5/resolve/main/manifest.json", "fibo/",
-            "$HF/fibo-gpu/resolve/main/manifest.json")
+            "$HF/fibo-gpu/resolve/main/manifest2.json")
         val MOSS = ModelStore(
             "moss", "MOSS-Image",
             "MOSS-Image and its 8-step add-on are released under the Apache 2.0 licence.",
             "$HF/moss-qnn-8elite/resolve/main/manifest.json", "$HF/moss-qnn-8elite-gen5/resolve/main/manifest.json", "moss/",
-            "$HF/moss-gpu/resolve/main/manifest.json")
+            "$HF/moss-gpu/resolve/main/manifest2.json")   // manifest2: the Vulkan layout (256-input blocks), as Anima
         val WAN = ModelStore(
             "wan", "Wan 2.2 clips",
             "Wan 2.2 (Alibaba), its LightTAE decoder and the umT5 prompt reader are released under the Apache 2.0 " +
                 "licence. The Turbo version's page names no licence.",
             "$HF/wan22-qnn-8elite/resolve/main/manifest.json", "$HF/wan22-qnn-8elite-gen5/resolve/main/manifest.json", "wan/",
-            "$HF/wan22-gpu/resolve/main/manifest.json")
+            "$HF/wan22-gpu/resolve/main/manifest2.json")
         val LING = ModelStore(
             "ling", "Ling-3.0-tiny (chat)",
             "Ling-3.0-tiny is released by inclusionAI under the MIT licence.",
