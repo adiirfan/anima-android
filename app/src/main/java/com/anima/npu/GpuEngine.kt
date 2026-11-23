@@ -60,12 +60,12 @@ object GpuEngine {
     fun setEngineChoice(ctx: Context, v: Int) = ctx.getSharedPreferences("anima", Context.MODE_PRIVATE).edit().putInt("graphicsEngine", v).apply()
     private const val VKLIB = "libvkugpu.so"
     /** The models the Vulkan engine can draw, for the Settings text. */
-    const val VULKAN_MODELS = "Anima, Klein, Qwen-Image, Fibo, MOSS and Wan"
+    const val VULKAN_MODELS = "Anima, Klein, Krea, Qwen-Image, Fibo, MOSS and Wan"
     /**
      * Vulkan draws when picked, or automatically on the chip it was checked on: the Snapdragon 8 Elite Gen 5's
      * graphics chip has a block for 8-bit matrix maths that only Vulkan reaches (about 1.5x faster per step with a
      * model file in 256-input scale blocks; with the older 64-input files it is no faster, and the engine declines).
-     * It reads the big models (Qwen, Fibo, Wan, MOSS, Klein) from storage block by block, so they pass 0; Anima stays
+     * It reads the big models (Qwen, Fibo, Wan, MOSS, Klein, Krea) from storage block by block, so they pass 0; Anima stays
      * whole in memory, so automatic leaves phones under [minGb] on OpenCL for it.
      */
     private fun vulkanAllowed(ctx: Context, minGb: Int): Boolean {
@@ -442,7 +442,7 @@ object GpuEngine {
     }
 
     // ---- Qwen-Image 2.1 Turbo ----
-    // ---- Krea 2 Turbo (krea_q4.gguf: 4-bit drawing tables, 8-bit maths, model "krea" in the engine; reader = Qwen3-VL-4B through texttaps "krea") ----
+    // ---- Krea 2 Turbo (krea_q4.gguf: 4-bit drawing tables in the Vulkan layout (two-level scales), 8-bit maths, model "krea" in the engine; reader = Qwen3-VL-4B through texttaps "krea") ----
     private const val KREA_FILES = "krea_q4.gguf tae_w21.gguf krea_reader.gguf qwen_tokenizer.json"
     private const val KREA_DROP = 34   // template rows before the prompt: the system turn and "<|im_start|>user\n"
     private val KREA_SIGMAS = floatArrayOf(1.0f, 0.9499281f, 0.8877230f, 0.8083667f, 0.7036315f, 0.5590252f, 0.3464282f, 0.0031514f, 0f)
@@ -484,8 +484,9 @@ object GpuEngine {
         File(work, "engine.txt").writeText("$Ni $Lt $Lp $width $height\n")
         // 3. the drawing, then the decoder (draw.f32 is (h, w, 16), as the decoder reads it)
         val step = Regex("^draw step (\\d+):")
-        run(ctx, listOf(File(wdir, "krea_q4.gguf").absolutePath, work.absolutePath),
-            mapOf("DRAW" to "1", "STREAM" to "1", "TUNEFILE" to File(home, "krea.tune").absolutePath)) { l ->
+        // Vulkan reads the blocks from storage as it goes, OpenCL with STREAM=1: neither needs a big phone
+        draw(ctx, listOf(File(wdir, "krea_q4.gguf").absolutePath, work.absolutePath), mapOf("DRAW" to "1"),
+            mapOf("STREAM" to "1", "TUNEFILE" to File(home, "krea.tune").absolutePath), 0, { progress.onStep(0, steps) }) { l ->
             step.find(l)?.let { progress.onStep(it.groupValues[1].toInt() + 1, steps) }
         }
         val dec = File(work, "dec").apply { mkdirs() }
