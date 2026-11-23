@@ -68,7 +68,7 @@ object GpuEngine {
         runProgram(ctx, LIB, if (args.size == 2) args + "0" else args, env, line)
 
     /** Runs [lib] (a program in the app's library folder) once, in the engine's folder. */
-    private fun runProgram(ctx: Context, lib: String, args: List<String>, env: Map<String, String>, line: (String) -> Unit = {}) {
+    internal fun runProgram(ctx: Context, lib: String, args: List<String>, env: Map<String, String>, line: (String) -> Unit = {}) {
         val home = home(ctx)
         val libs = ctx.applicationInfo.nativeLibraryDir
         val pb = ProcessBuilder(listOf(File(libs, lib).absolutePath) + args).directory(home).redirectErrorStream(true)
@@ -100,7 +100,7 @@ object GpuEngine {
         f.writeBytes(b.array())
     }
 
-    private fun readF32(f: File): FloatArray {
+    internal fun readF32(f: File): FloatArray {
         val b = ByteBuffer.wrap(f.readBytes()).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
         return FloatArray(b.remaining()).also { b.get(it) }
     }
