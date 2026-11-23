@@ -105,6 +105,11 @@ class ModelStore(
             "FLUX.2 [klein] 4B is released by Black Forest Labs under the Apache 2.0 licence.",
             "$HF/klein-4b-qnn-8elite/resolve/main/manifest.json", "$HF/klein-4b-qnn-8elite-gen5/resolve/main/manifest.json", "klein/",
             "$HF/klein-4b-gpu/resolve/main/manifest2.json")   // manifest2: the Vulkan layout (256-input blocks), as Anima
+        val KREA = ModelStore(
+            "krea", "Krea 2 Turbo",
+            "Krea 2 is released by Krea under the Krea 2 Community License.",
+            "$HF/krea-2-turbo-qnn-8elite/resolve/main/manifest.json", "$HF/krea-2-turbo-qnn-8elite-gen5/resolve/main/manifest.json", "krea/",
+            "$HF/krea-2-turbo-gpu/resolve/main/manifest.json")
         val QWEN = ModelStore(
             "qwen", "Qwen-Image 2.1",
             "Qwen-Image 2.1 is released under the Qwen Research License: non-commercial use only. Built with Qwen.",
@@ -134,11 +139,11 @@ class ModelStore(
             "smallchat", "Qwen3.5 0.8B (small chat)",
             "Qwen3.5 0.8B is released by the Qwen team (Alibaba) under the Apache 2.0 licence.",
             "$CHAT/smallchat/manifest.json", "$CHAT/smallchat/manifest.json", "smallchat/", sameFilesOnGpu = true)
-        val ALL = listOf(ANIMA, KLEIN, QWEN, FIBO, MOSS, WAN, LING, SMALLCHAT)
+        val ALL = listOf(ANIMA, KLEIN, KREA, QWEN, FIBO, MOSS, WAN, LING, SMALLCHAT)
         /** The picture models, for the Create screen's picker. */
-        val PICTURE = listOf(ANIMA, KLEIN, QWEN, FIBO, MOSS)
+        val PICTURE = listOf(ANIMA, KLEIN, KREA, QWEN, FIBO, MOSS)
         /** The first-run setup's lists: what makes pictures (and clips), and the chat models. */
-        val SETUP_PICTURE = listOf(ANIMA, MOSS, FIBO, WAN, QWEN, KLEIN)
+        val SETUP_PICTURE = listOf(ANIMA, MOSS, FIBO, WAN, QWEN, KLEIN, KREA)
         val SETUP_CHAT = listOf(LING, SMALLCHAT)
         fun byId(id: String) = ALL.firstOrNull { it.id == id } ?: ALL.mapNotNull { it.gpu }.first { it.id == id }
     }

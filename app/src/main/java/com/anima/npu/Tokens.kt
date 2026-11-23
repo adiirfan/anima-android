@@ -124,6 +124,30 @@ object KleinTokens {
 }
 
 /**
+ * Krea 2's prompt: ComfyUI's Krea2Tokenizer template (Qwen-Image's system turn, then the user turn) around the plain
+ * text. The engine leaves out the first 34 rows (the system turn and "<|im_start|>user\n") after reading.
+ */
+object KreaTokens {
+    private var qwen: HuggingFaceTokenizer? = null
+    private const val TEMPLATE = "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, " +
+        "quantity, text, spatial relationships of the objects and background:<|im_end|>\n<|im_start|>user\n%s<|im_end|>\n" +
+        "<|im_start|>assistant\n"
+
+    fun init(modelDir: File) {
+        if (qwen != null) return
+        qwen = HuggingFaceTokenizer.builder()
+            .optTokenizerPath(File(modelDir, "qwen_tokenizer.json").toPath())
+            .optAddSpecialTokens(false)
+            .optTruncation(false)
+            .optPadding(false)
+            .build()
+    }
+
+    fun encode(text: String): IntArray =
+        qwen!!.encode(TEMPLATE.format(text), false, false).ids.map { it.toInt() }.toIntArray()
+}
+
+/**
  * Qwen-Image 2.1's prompt: ComfyUI's QwenImage21Tokenizer template (a system turn the drawing model never sees, then
  * the user turn). An edit puts the picture before the text as "<image1>" + the vision block, whose single
  * <|image_pad|> becomes the picture's 576 rows (24 x 24 at 768). Checked against ComfyUI's ids for a picture and an

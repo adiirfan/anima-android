@@ -17,6 +17,7 @@ object Engines {
     private val lock = Mutex()
     private var anima = false
     private var klein = false
+    private var krea = false
     private var qwen: String? = null   // the Qwen drawing model it was started with ("qwen" or "noctq")
     private var fibo = false
     private var moss = false
@@ -57,6 +58,22 @@ object Engines {
             Engine.kleinSetMemoryMode(memoryMode)
             KleinTokens.init(dir)
             klein = true
+            null
+        }
+    }
+
+    suspend fun ensureKrea(): String? = lock.withLock {
+        withContext(Dispatchers.Default) {
+            if (krea) return@withContext null
+            val dir = ModelStore.KREA.modelDir(app)
+            // debug builds: with files/krea-dump present, every picture's stage outputs go to cache/krea_dump (krea.cpp)
+            if (BuildConfig.DEBUG && java.io.File(app.filesDir, "krea-dump").exists()) {
+                val d = java.io.File(app.cacheDir, "krea_dump").apply { mkdirs() }
+                android.system.Os.setenv("KREA_DUMP", d.absolutePath, true)
+            }
+            Engine.kreaInit(dir.absolutePath, libDir)?.let { return@withContext it }
+            KreaTokens.init(dir)
+            krea = true
             null
         }
     }
@@ -116,7 +133,7 @@ object Engines {
 
     /** After a model download: the engine reads its files afresh next time. */
     fun invalidate(model: String) {
-        when (model) { "klein" -> klein = false; "qwen" -> qwen = null; "fibo" -> fibo = false; "moss" -> moss = false; "wan" -> wan = false; else -> anima = false }
+        when (model) { "klein" -> klein = false; "krea" -> krea = false; "qwen" -> qwen = null; "fibo" -> fibo = false; "moss" -> moss = false; "wan" -> wan = false; else -> anima = false }
     }
 
     fun release() = Engine.release()

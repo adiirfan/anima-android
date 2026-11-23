@@ -442,6 +442,66 @@ object GpuEngine {
     }
 
     // ---- Qwen-Image 2.1 Turbo ----
+    // ---- Krea 2 Turbo (krea_q4.gguf: 4-bit drawing tables, 8-bit maths, model "krea" in the engine; reader = Qwen3-VL-4B through texttaps "krea") ----
+    private const val KREA_FILES = "krea_q4.gguf tae_w21.gguf krea_reader.gguf qwen_tokenizer.json"
+    private const val KREA_DROP = 34   // template rows before the prompt: the system turn and "<|im_start|>user\n"
+    private val KREA_SIGMAS = floatArrayOf(1.0f, 0.9499281f, 0.8877230f, 0.8083667f, 0.7036315f, 0.5590252f, 0.3464282f, 0.0031514f, 0f)
+
+    fun kreaDir(ctx: Context): File = ModelStore.KREA.gpu!!.modelDir(ctx)
+
+    fun kreaReady(ctx: Context) = program(ctx).isFile && File(ctx.applicationInfo.nativeLibraryDir, "libtexttaps.so").isFile &&
+        KREA_FILES.split(" ").all { File(kreaDir(ctx), it).isFile }
+
+    /** Krea on the graphics chip: picked on the models page, or the phone has no AI-chip build of it. */
+    fun useForKrea(ctx: Context) = ModelStore.KREA.runsOnGpu(ctx) && kreaReady(ctx)
+
+    /**
+     * Krea 2 Turbo: the reader's 12 tapped layers (processor), then the engine runs Krea's prompt fusion and the
+     * 8 fixed steps (4-bit blocks streamed from storage: 7.8 GB), then the small Wan 2.1 decoder.
+     */
+    fun kreaGenerate(ctx: Context, ids: IntArray, seed: Long, width: Int, height: Int, progress: Progress): IntArray {
+        val lh = height / 8; val lw = width / 8; val Ni = (lh / 2) * (lw / 2)
+        val steps = KREA_SIGMAS.size - 1
+        val wdir = kreaDir(ctx)
+        progress.onStep(0, steps)
+        val Lt = ids.size - KREA_DROP
+        if (Lt < 1 || ids.size > 512) error("prompt is not in Krea's template, or too long")
+        val Lp = (Ni + Lt + 7) / 8 * 8 - Ni - Lt
+        val work = File(ctx.cacheDir, "ugpu_krea").apply { deleteRecursively(); mkdirs() }
+        val home = home(ctx)
+        // 1. the reader: ctx.f32 = the kept rows x 12 tapped layers
+        val ib = ByteBuffer.allocate(ids.size * 4).order(ByteOrder.LITTLE_ENDIAN)
+        ib.asIntBuffer().put(ids)
+        File(work, "ids.i32").writeBytes(ib.array())
+        val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 8).toString()
+        runProgram(ctx, "libtexttaps.so", listOf(File(wdir, "krea_reader.gguf").absolutePath,
+            File(work, "ids.i32").absolutePath, work.absolutePath, threads, "krea", KREA_DROP.toString()), emptyMap())
+        if (File(work, "ctx.f32").length() != Lt * 12L * 2560 * 4) error("prompt reader gave the wrong number of rows")
+        // 2. noise (16 x h x w, the model's latent space) and the fixed schedule
+        val rnd = java.util.Random(seed)
+        writeF32(File(work, "noise.f32"), FloatArray(16 * lh * lw) { rnd.nextGaussian().toFloat() })
+        writeF32(File(work, "sigmas.f32"), KREA_SIGMAS)
+        File(work, "engine.txt").writeText("$Ni $Lt $Lp $width $height\n")
+        // 3. the drawing, then the decoder (draw.f32 is (h, w, 16), as the decoder reads it)
+        val step = Regex("^draw step (\\d+):")
+        run(ctx, listOf(File(wdir, "krea_q4.gguf").absolutePath, work.absolutePath),
+            mapOf("DRAW" to "1", "STREAM" to "1", "TUNEFILE" to File(home, "krea.tune").absolutePath)) { l ->
+            step.find(l)?.let { progress.onStep(it.groupValues[1].toInt() + 1, steps) }
+        }
+        val dec = File(work, "dec").apply { mkdirs() }
+        if (!File(work, "draw.f32").renameTo(File(dec, "lat.f32"))) error("graphics-chip engine gave no picture")
+        File(dec, "info.txt").writeText("$lh $lw\n")
+        run(ctx, listOf(File(wdir, "tae_w21.gguf").absolutePath, dec.absolutePath),
+            mapOf("TUNEFILE" to File(home, "tae_w21.tune").absolutePath))
+        val rgb = readF32(File(dec, "gpu_rgb.f32"))
+        if (rgb.size != width * height * 3) error("picture decoder gave ${rgb.size} numbers, not ${width * height * 3}")
+        cleanUp(ctx, work)
+        fun px(v: Float) = (v.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+        return IntArray(width * height) { k ->
+            (0xFF shl 24) or (px(rgb[3 * k]) shl 16) or (px(rgb[3 * k + 1]) shl 8) or px(rgb[3 * k + 2])
+        }
+    }
+
     private const val QWEN_FILES = "qwen_q4.gguf tae_qwen.gguf qimg_reader.gguf qwen_tokenizer.json"
     /** Turbo's 8 fixed noise levels (no shift), as the AI-chip route's sigmas.txt; the engine adds the final 0. */
     private val QWEN_SIGMAS = floatArrayOf(1.0f, 0.978453f, 0.95418f, 0.926626f, 0.89508f, 0.845148f, 0.704534f, 0.414568f)

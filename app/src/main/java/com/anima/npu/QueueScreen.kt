@@ -64,6 +64,7 @@ private fun modelName(j: Job) = when (j.model) {
     "wan" -> "Wan clip"
     "upscale" -> "Upscale"
     "klein" -> "Klein"
+    "krea" -> "Krea"
     else -> "Anima"
 }
 

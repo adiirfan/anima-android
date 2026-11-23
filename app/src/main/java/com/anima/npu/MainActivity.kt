@@ -109,16 +109,17 @@ class CreateState {
     var qwenDrawing by mutableStateOf("qwen")  // Qwen's drawing model: "qwen" (Qwen-Image 2.1) or "noctq" (qwen/noctq/)
     var animaPrompt by mutableStateOf("masterpiece, best quality, safe, 1girl, solo, long hair, smile, cherry blossoms, outdoors")
     var kleinPrompt by mutableStateOf("a cozy coffee shop interior with plants, warm light, people chatting, film photography")
+    var kreaPrompt by mutableStateOf("a red fox sitting in fresh snow, morning light, photo")
     var qwenPrompt by mutableStateOf("A digital painting of a knight in silver armor holding a glowing sword in a dark forest, dramatic lighting.")
     var fiboPrompt by mutableStateOf("Make the sky stormy and dark")
     var mossPrompt by mutableStateOf("A lighthouse on a rocky cliff at sunset, waves crashing below, warm golden light.")
     var wanPrompt by mutableStateOf("She smiles and turns her head slowly toward the camera, her hair moving in a light breeze.")
     var prompt: String
-        get() = when (model) { "klein" -> kleinPrompt; "qwen" -> qwenPrompt; "fibo" -> fiboPrompt; "moss" -> mossPrompt; "wan" -> wanPrompt; else -> animaPrompt }
-        set(v) { when (model) { "klein" -> kleinPrompt = v; "qwen" -> qwenPrompt = v; "fibo" -> fiboPrompt = v; "moss" -> mossPrompt = v; "wan" -> wanPrompt = v; else -> animaPrompt = v } }
+        get() = when (model) { "klein" -> kleinPrompt; "krea" -> kreaPrompt; "qwen" -> qwenPrompt; "fibo" -> fiboPrompt; "moss" -> mossPrompt; "wan" -> wanPrompt; else -> animaPrompt }
+        set(v) { when (model) { "klein" -> kleinPrompt = v; "krea" -> kreaPrompt = v; "qwen" -> qwenPrompt = v; "fibo" -> fiboPrompt = v; "moss" -> mossPrompt = v; "wan" -> wanPrompt = v; else -> animaPrompt = v } }
     /** Puts back each model's saved prompt; [saved] gives the stored text for a model id, or null for none. */
     fun restorePrompts(saved: (String) -> String?) {
-        saved("anima")?.let { animaPrompt = it }; saved("klein")?.let { kleinPrompt = it }; saved("qwen")?.let { qwenPrompt = it }
+        saved("anima")?.let { animaPrompt = it }; saved("klein")?.let { kleinPrompt = it }; saved("krea")?.let { kreaPrompt = it }; saved("qwen")?.let { qwenPrompt = it }
         saved("fibo")?.let { fiboPrompt = it }; saved("moss")?.let { mossPrompt = it }; saved("wan")?.let { wanPrompt = it }
     }
     var edit by mutableStateOf<Bitmap?>(null)  // Klein / Qwen: the picture to change (cropped per size); null = new picture
@@ -182,7 +183,7 @@ const val NOCTQ_DIR = "noctq"
 const val FIBO_TIME = "edits only · 4 steps · about 1 min 30 s"   // Fibo 2.0 edit-turbo, iQOO 13 2026-11-06
 const val MOSS_TIME = "8 steps · about 1 min 30 s"   // MOSS-Image SFT + 8-step DMD add-on, iQOO 13 2026-11-06
 /** The models that draw one 768x768 size only, with no size or memory choices. */
-val BIG_MODELS = setOf("qwen", "fibo", "moss", "wan")
+val BIG_MODELS = setOf("qwen", "fibo", "moss", "wan", "krea")
 const val WAN_TIME = "17 frames, a looping video · about 2.5 min on the iQOO 13"
 const val WAN_LONG_TIME = "49 frames, a 3-second video · about 3.5 min"   // the Fold, 2026-11-18 (206 s)
 const val MOSS_GPU_TIME = "8 steps · about 4 min on the graphics chip"   // the Fold in the app, 2026-11-19 (232 s)
