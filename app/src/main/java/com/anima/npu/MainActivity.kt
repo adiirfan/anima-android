@@ -72,7 +72,6 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.Switch
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -299,8 +298,9 @@ class MainActivity : ComponentActivity() {
         }
         testDraw(intent)
 
+        Look.load(this)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            PaperTheme(Look.isBlack(Look.mode, androidx.compose.foundation.isSystemInDarkTheme())) {
                 val ctx = this@MainActivity
                 // installed variant per model (ModelStore id -> variant id or null)
                 // (judged by the build the model draws with: AI chip or graphics chip, as chosen on the models page)
