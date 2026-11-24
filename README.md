@@ -36,6 +36,17 @@ The larger models need a lot of memory and are much slower on older phones.
   Anima or Qwen-Image, writes the prompt, adds it to the queue, and shows the picture in the conversation.
 - **Updates.** The app updates itself from this repo's releases.
 
+## Samples
+
+Drawn on a Snapdragon 8 Elite Gen 5 phone in airplane mode, with the prompts below, and shown here smaller.
+
+| | | |
+|---|---|---|
+| ![Anima](samples/anima.jpg) | ![FLUX.2 klein](samples/klein.jpg) | ![Krea 2 Turbo](samples/krea.jpg) |
+| **Anima Turbo:** masterpiece, best quality, safe, 1girl, solo, silver hair, long hair, blue eyes, smile, school uniform, cherry blossoms, falling petals, outdoors, spring, soft light | **FLUX.2 klein:** a cozy coffee shop interior with plants, warm light, people chatting, film photography | **Krea 2 Turbo:** a red fox sitting in fresh snow, morning light, photo |
+| ![Qwen-Image](samples/qwen.jpg) | ![MOSS-Image](samples/moss.jpg) | ![Fibo edit](samples/fibo-edit.jpg) |
+| **Qwen-Image 2.1:** A digital painting of a knight in silver armor holding a glowing sword in a dark forest, dramatic lighting. | **MOSS-Image:** A lighthouse on a rocky cliff at sunset, waves crashing below, warm golden light. | **Fibo 2.0**, editing the Krea fox: Make it night with a starry sky and green northern lights |
+
 ## Downloads
 
 On first launch a setup screen lists the models this phone can run, with their download sizes. Tick the ones you
