@@ -11,6 +11,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.NavigationRailItemDefaults
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.draw.clip
 import androidx.compose.material3.IconButton
@@ -376,15 +379,23 @@ class MainActivity : ComponentActivity() {
                 // took a strip of every screen (2026-10-09).
                 fun go(t: Int) { showSetup = false; downloadFor = null; updating = false; showQueue = false; open = null; tab = t; navScope.launch { drawer.close() } }
                 val wide = isWide()
+                val paper = LocalPaper.current
                 val menu: @Composable ColumnScope.() -> Unit = {
-                        Text("Anima", Modifier.padding(start = 28.dp, top = 20.dp, bottom = 16.dp),
-                            style = MaterialTheme.typography.titleLarge)
+                        Row(Modifier.padding(start = 24.dp, top = 20.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            AppMark(); Spacer(Modifier.width(12.dp))
+                            Text("Anima", style = MaterialTheme.typography.titleLarge)
+                        }
                         val qTick by Queue.store.changed.collectAsState()
                         val waiting = remember(qTick) { Queue.store.waitingCount() }
                         @Composable fun item(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean,
                                              badge: Int = 0, onClick: () -> Unit) =
-                            NavigationDrawerItem(label = { Text(label) }, selected = selected, onClick = onClick,
-                                icon = { Icon(icon, null) }, badge = { if (badge > 0) Text("$badge") },
+                            NavigationDrawerItem(label = { Text(label, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium) },
+                                selected = selected, onClick = onClick,
+                                icon = { Icon(icon, null) }, badge = { if (badge > 0) CountBadge(badge) },
+                                colors = NavigationDrawerItemDefaults.colors(
+                                    selectedContainerColor = paper.soft, unselectedContainerColor = Color.Transparent,
+                                    selectedIconColor = paper.softText, unselectedIconColor = paper.muted,
+                                    selectedTextColor = paper.text, unselectedTextColor = paper.muted),
                                 modifier = Modifier.padding(horizontal = 12.dp))
                         val here = downloadFor == null && open == null && !showQueue
                         item("Create", AppIcons.Create, here && tab == 0) { go(0) }
@@ -479,11 +490,16 @@ class MainActivity : ComponentActivity() {
                     val qTick by Queue.store.changed.collectAsState()
                     val waiting = remember(qTick) { Queue.store.waitingCount() }
                     val here = downloadFor == null && open == null && !showQueue
-                    NavigationRail(Modifier.safeDrawingPadding()) {
+                    NavigationRail(Modifier.safeDrawingPadding(), containerColor = paper.background,
+                        header = { Spacer(Modifier.height(10.dp)); AppMark(); Spacer(Modifier.height(10.dp)) }) {
                         @Composable fun rail(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean,
                                              badge: Int = 0, onClick: () -> Unit) =
-                            NavigationRailItem(selected = selected, onClick = onClick, label = { Text(label) },
-                                icon = { if (badge > 0) BadgedBox(badge = { Badge { Text("$badge") } }) { Icon(icon, label) } else Icon(icon, label) })
+                            NavigationRailItem(selected = selected, onClick = onClick,
+                                label = { Text(label, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium) },
+                                icon = { if (badge > 0) BadgedBox(badge = { CountBadge(badge) }) { Icon(icon, label) } else Icon(icon, label) },
+                                colors = NavigationRailItemDefaults.colors(indicatorColor = paper.soft,
+                                    selectedIconColor = paper.softText, unselectedIconColor = paper.muted,
+                                    selectedTextColor = paper.text, unselectedTextColor = paper.muted))
                         Spacer(Modifier.height(8.dp))
                         rail("Create", AppIcons.Create, here && tab == 0) { go(0) }
                         rail("Chat", AppIcons.Chat, here && tab == 1) { go(1) }
@@ -491,10 +507,11 @@ class MainActivity : ComponentActivity() {
                         rail("Queue", AppIcons.Queue, showQueue, badge = waiting) { go(0); showQueue = true }
                         rail("Settings", AppIcons.Settings, here && tab == 3) { go(3) }
                     }
+                    VerticalDivider(color = paper.divider)
                     Box(Modifier.weight(1f)) { body() }
                 }
                 else ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = open == null, drawerContent = {
-                    ModalDrawerSheet(Modifier.safeDrawingPadding()) { menu() }
+                    ModalDrawerSheet(Modifier.safeDrawingPadding(), drawerContainerColor = paper.background) { menu() }
                 }) { body() }
             }
         }
@@ -949,3 +966,14 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
     }
     }
 }
+
+/** The app's mark in the menu: a small blue square with "A". */
+@Composable
+private fun AppMark() = Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(LocalPaper.current.accent),
+    contentAlignment = Alignment.Center) {
+    Text("A", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+}
+
+/** How many pictures wait in the queue, as a small blue badge. */
+@Composable
+private fun CountBadge(n: Int) = Badge(containerColor = LocalPaper.current.badge, contentColor = Color.White) { Text("$n") }
