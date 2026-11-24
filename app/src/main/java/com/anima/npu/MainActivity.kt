@@ -827,7 +827,7 @@ fun Create(
                             s.status = "Saved to Pictures/Anima (${bmp.width}×${bmp.height})"
                         }
                     }
-                    if (bmp.width == s.genW && animaInstalled) Pill("Upscale 4×", enabled = !s.busy && !Installer.isRunning("anima")) {
+                    if (bmp.width == s.genW && Upscaler.fits(bmp.width, bmp.height) && animaInstalled) Pill("Upscale 4×", enabled = !s.busy && !Installer.isRunning("anima")) {
                         s.busy = true
                         scope.launch {
                             val w = bmp.width
@@ -1045,7 +1045,7 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
         // 4x bigger, in place of this picture. Up to 1024 on the long side: 4x of more would not fit in memory.
         val b = bmp
         // the upscaler runs on the AI chip: phones without one never get it, so no button that can only say "download Anima"
-        if (Chip.supported && !gif && b != null && maxOf(b.width, b.height) <= 1024) {
+        if (Chip.supported && !gif && b != null && Upscaler.fits(b.width, b.height)) {
             Pill("Upscale 4× (replaces this picture)", enabled = !upscaling && Upscaler.available(ctx)) {
                 upscaling = true
                 note = if (QueueService.progress.value.first.isNotEmpty()) "Upscaling after the picture being drawn…" else "Upscaling…"

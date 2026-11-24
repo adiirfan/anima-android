@@ -31,11 +31,16 @@ object Upscaler {
 
     fun available(ctx: Context) = Chip.supported && ModelStore.ANIMA.installed(ctx) != null   // runs on the AI chip
 
+    /** Up to 1024 on the long side: 4x of more does not fit in the app's memory (an already upscaled 3072 picture,
+     *  4x again, crashed the app). */
+    fun fits(w: Int, h: Int) = maxOf(w, h) <= 1024
+
     /** The picture 4x bigger. Throws with the reason when it cannot. */
     suspend fun upscale(ctx: Context, bmp: Bitmap): Bitmap = withContext(Dispatchers.Default) {
         if (!available(ctx)) error("The upscaler comes with Anima: download Anima first")
         Engines.ensureAnima()?.let { error("Could not start the upscaler: $it") }
         val w = bmp.width; val h = bmp.height
+        if (!fits(w, h)) error("This picture is already big (${w}×${h}): it cannot be upscaled again")
         val px = IntArray(w * h).also { bmp.getPixels(it, 0, w, 0, 0, w, h) }
         val up = Engine.upscale(px, w, h) ?: error(Engine.lastError())
         Bitmap.createBitmap(up, 4 * w, 4 * h, Bitmap.Config.ARGB_8888)
