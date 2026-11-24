@@ -60,3 +60,49 @@ class ChatDrawPlanTest {
 
     @Test fun otherModelsIgnored() = assertFalse((planDraw("anima", false, Named(null, null, null), setOf("anima", "klein", "moss")) as DrawPlan.Ask).askModel)
 }
+
+class SettleOfferTest {
+    private val choice = Msg.Choice("c", "cat", "square", 1, "anima", true, true, true, 0, 4)
+    private var n = 0
+    private fun id() = "n${n++}"
+
+    @Test fun replyAfterCardBecomesThePointer() = assertEquals(
+        listOf(Msg.User("u", "draw a cat", null), Msg.ToolCall("t", "k", "draw_picture", "{}"), choice,
+            Msg.ToolResult("r", "k", "{}"), Msg.Assistant("n0", OFFER_LINE, "")),
+        settleOffer(listOf(Msg.User("u", "draw a cat", null), Msg.ToolCall("t", "k", "draw_picture", "{}"), choice,
+            Msg.ToolResult("r", "k", "{}"), Msg.Assistant("a", "The picture is on its way!", "")), ::id))
+
+    @Test fun replyBeforeCardIsKept() = assertEquals(
+        listOf(Msg.User("u", "draw a cat", null), Msg.Assistant("a", "Sure!", ""), choice, Msg.Assistant("n0", OFFER_LINE, "")),
+        settleOffer(listOf(Msg.User("u", "draw a cat", null), Msg.Assistant("a", "Sure!", ""), choice), ::id))
+
+    @Test fun noCardNoChange() {
+        val m = listOf(Msg.User("u", "hi", null), Msg.Assistant("a", "Hello!", ""))
+        assertEquals(m, settleOffer(m, ::id))
+    }
+}
+
+class DrawnChoiceTest {
+    private val choice = Msg.Choice("c", "cat", "square", 1, "anima", true, true, true, 0, 4)
+    private val pic = Msg.Picture("p", "job1")
+
+    @Test fun cardBecomesPictureAndPointerGoes() = assertEquals(
+        listOf(Msg.User("u", "draw a cat", null), pic),
+        drawnChoice(listOf(Msg.User("u", "draw a cat", null), choice, Msg.Assistant("a", OFFER_LINE, "")), "c", listOf(pic)))
+
+    @Test fun otherRepliesStay() = assertEquals(
+        listOf(Msg.Assistant("a", "Sure!", ""), pic),
+        drawnChoice(listOf(Msg.Assistant("a", "Sure!", ""), choice), "c", listOf(pic)))
+}
+
+class DrawnChoiceOtherCardTest {
+    @Test fun otherCardKeepsItsLine() {
+        val a = Msg.Choice("c1", "cat", "square", 1, "anima", true, true, true, 0, 4)
+        val b = Msg.Choice("c2", "dog", "square", 1, "anima", true, true, true, 0, 4)
+        val pic = Msg.Picture("p", "job1")
+        assertEquals(
+            listOf(Msg.User("u1", "draw a cat", null), pic, Msg.User("u2", "draw a dog", null), b, Msg.Assistant("l2", OFFER_LINE, "")),
+            drawnChoice(listOf(Msg.User("u1", "draw a cat", null), a, Msg.Assistant("l1", OFFER_LINE, ""),
+                Msg.User("u2", "draw a dog", null), b, Msg.Assistant("l2", OFFER_LINE, "")), "c1", listOf(pic)))
+    }
+}

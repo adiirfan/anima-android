@@ -1032,12 +1032,13 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
         androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Button(onClick = { onUse(e) }) { Text("Use this prompt") }
-            Pill("Share", modifier = Modifier.height(40.dp)) {
+            // centred on the blue button, which is taller than it looks (room for a finger)
+            Pill("Share", modifier = Modifier.height(40.dp).align(Alignment.CenterVertically)) {
                 val send = Intent(Intent.ACTION_SEND).setType(Gallery.mime(ctx, e)).putExtra(Intent.EXTRA_STREAM, e.uri)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 ctx.startActivity(Intent.createChooser(send, "Share picture"))
             }
-            Pill("Delete", enabled = !upscaling, modifier = Modifier.height(40.dp)) {
+            Pill("Delete", enabled = !upscaling, modifier = Modifier.height(40.dp).align(Alignment.CenterVertically)) {
                 scope.launch(Dispatchers.IO) { Gallery.delete(ctx, e); withContext(Dispatchers.Main) { onBack() } } }
         }
         // 4x bigger, in place of this picture. Up to 1024 on the long side: 4x of more would not fit in memory.

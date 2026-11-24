@@ -89,6 +89,7 @@ class ChatController(ctx: Context) {
             var badInARow = 0
             var queued = false
             var called = false
+            offered = false
             for (round in 0 until 3) {
                 val c = store.get(id) ?: return@withChat
                 val calls = runRound(id, c) ?: return@withChat
@@ -106,6 +107,8 @@ class ChatController(ctx: Context) {
             // the small model often answers "Sure, I can draw that!" and never asks for it: if the user asked for a
             // picture in so many words, offer the card anyway, with their own words as the description
             if (!called && !stopping && forgotToDraw(id)) queued = true
+            // a card waits for the user: chat's last word points at it instead of the model's "on its way"
+            if (offered) synchronized(lock) { store.get(id)?.let { c -> save(c.copy(msgs = settleOffer(c.msgs, ::newId))) } }
             if (queued) QueueService.kick(app)
         }
     }
@@ -169,6 +172,7 @@ class ChatController(ctx: Context) {
                         JSONObject().put("queued", jobs.size).put("position", Queue.store.waitingCount())
                     }
                     is DrawPlan.Ask -> {
+                        offered = true
                         append(id, choiceFor(r.args.prompt, r.args.size, r.args.count, plan))
                         ok = true
                         JSONObject().put("waiting", "A card under your reply lets the user pick the model, size and steps and tap Draw. " +
@@ -230,7 +234,7 @@ class ChatController(ctx: Context) {
                     .forEach { j -> append(id, Msg.Picture(newId(), j.id)) }
                 true
             }
-            is DrawPlan.Ask -> { append(id, choiceFor(words, shape, 1, plan)); false }
+            is DrawPlan.Ask -> { offered = true; append(id, choiceFor(words, shape, 1, plan)); false }
             is DrawPlan.Bad -> false
         }
     }
@@ -241,7 +245,7 @@ class ChatController(ctx: Context) {
         val m = c.msgs.firstOrNull { it.id == msgId } as? Msg.Choice ?: return@synchronized
         val jobs = enqueueFromChat(convId, DrawArgs(model, m.prompt, m.shape, false, m.count), null, tier, steps)
         val pics = jobs.map { Msg.Picture(newId(), it.id) }
-        save(c.copy(msgs = c.msgs.flatMap { if (it.id == msgId) pics else listOf(it) }, updated = System.currentTimeMillis()))
+        save(c.copy(msgs = drawnChoice(c.msgs, msgId, pics), updated = System.currentTimeMillis()))
         QueueService.kick(app)
     }
 
@@ -285,6 +289,9 @@ class ChatController(ctx: Context) {
         }
         return a
     }
+
+    /** This turn put a card up (set while a turn runs; one turn at a time). */
+    @Volatile private var offered = false
 
     // a Draw tap and a reply can change the same conversation at once
     private val lock = Any()

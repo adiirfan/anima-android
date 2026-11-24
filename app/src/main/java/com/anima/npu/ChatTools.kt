@@ -120,3 +120,26 @@ fun planDraw(suggested: String, edit: Boolean, named: Named, installed: Set<Stri
     if (!askModel && (model == "qwen" || (!askSize && !askSteps))) return DrawPlan.Queue(model, if (model == "qwen") 0 else tier, if (model == "qwen") 8 else steps)
     return DrawPlan.Ask(model, askModel, askSize, askSteps, tier, steps)
 }
+
+/** What chat says under a card that waits for the user. */
+const val OFFER_LINE = "Pick the options on the card above, then tap Draw."
+
+/**
+ * After a turn that offered a card: the replies written after the newest card become one line pointing at it. The small
+ * model said "The picture is on its way!" before anything was drawn. Replies before the card are kept.
+ */
+fun settleOffer(msgs: List<Msg>, newId: () -> String): List<Msg> {
+    val i = msgs.indexOfLast { it is Msg.Choice }
+    if (i < 0) return msgs
+    return msgs.take(i + 1) + msgs.drop(i + 1).filter { it !is Msg.Assistant } + Msg.Assistant(newId(), OFFER_LINE, "")
+}
+
+/** The user tapped Draw: card [choiceId] becomes [pictures], and the "pick the options" line under it goes. */
+fun drawnChoice(msgs: List<Msg>, choiceId: String, pictures: List<Msg>): List<Msg> {
+    val i = msgs.indexOfFirst { it.id == choiceId }
+    if (i < 0) return msgs
+    // this card's line: the first one after it, before the user's next message (other cards keep theirs)
+    val turnEnd = msgs.drop(i + 1).indexOfFirst { it is Msg.User }.let { if (it < 0) msgs.size else i + 1 + it }
+    val line = (i + 1 until turnEnd).firstOrNull { (msgs[it] as? Msg.Assistant)?.text == OFFER_LINE }
+    return msgs.flatMapIndexed { k, m -> when (k) { i -> pictures; line -> emptyList(); else -> listOf(m) } }
+}
