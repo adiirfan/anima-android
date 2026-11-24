@@ -94,14 +94,8 @@ import java.util.Date
 fun ChatScreen(chat: ChatController, isInstalled: (String) -> Boolean, onDownload: () -> Unit,
                onOpen: (Gallery.Entry) -> Unit, onMenu: () -> Unit) {
     val ctx = LocalContext.current
-    // chat runs on the neural unit too (llama.cpp's Hexagon build for v79 and v81 only)
-    if (!Chip.supported) {
-        Column(Modifier.fillMaxSize()) {
-            ChatBar(onMenu, "Chat")
-            DeviceNotSupported(Modifier.padding(24.dp))
-        }
-        return
-    }
+    // chat runs on the neural unit (llama.cpp's Hexagon build for v79 and v81); other phones get the small model on
+    // the processor (LocalLing.onProcessor)
     // which chat model (Settings or the pill in the composer); everything that depends on it reads this
     var slots by remember { mutableIntStateOf(LocalLing.expertSlots(ctx)) }
     val ready = remember(slots) { LocalLing.ready(ctx) } || isInstalled(LocalLing.store(ctx).id)
@@ -110,7 +104,9 @@ fun ChatScreen(chat: ChatController, isInstalled: (String) -> Boolean, onDownloa
             ChatBar(onMenu, "Chat", LocalLing.name(ctx))
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Chat needs ${LocalLing.name(ctx)}", style = MaterialTheme.typography.titleMedium)
-                Text(if (LocalLing.small(ctx)) "Qwen3.5 0.8B is the small chat model (the Lowest setting). It runs on " +
+                Text(if (LocalLing.onProcessor) "Qwen3.5 0.8B is the small chat model. It runs on this phone's " +
+                        "processor and can add pictures to the queue for you. It is a 0.8 GB download."
+                    else if (LocalLing.small(ctx)) "Qwen3.5 0.8B is the small chat model (the Lowest setting). It runs on " +
                         "the phone's AI chip and can add pictures to the queue for you. It is a 0.8 GB download."
                     else "Ling-3.0-tiny runs on the phone's AI chip and can add pictures to the queue for you. " +
                         "It is a 4.5 GB download. (Settings has a smaller model for phones short of memory.)")
@@ -260,7 +256,8 @@ private fun Conversation(chat: ChatController, convId: String?, conv: Conversati
                     if (conv != null) chat.setThinking(conv.id, !thinking) else newThinking = !thinking
                 }
                 Spacer(Modifier.width(4.dp))
-                ModelPill(slots, enabled = !busy) { n -> setSlots(n); LocalLing.setExpertSlots(ctx, n) }
+                // phones without the AI chip have the one model: nothing to pick
+                if (!LocalLing.onProcessor) ModelPill(slots, enabled = !busy) { n -> setSlots(n); LocalLing.setExpertSlots(ctx, n) }
                 Spacer(Modifier.weight(1f))
                 if (mine) FilledTonalIconButton(onClick = { chat.stop() }, Modifier.size(40.dp)) {
                     Icon(AppIcons.Stop, "Stop", Modifier.size(20.dp))
@@ -302,7 +299,7 @@ private val CHAT_MODELS = listOf(
 )
 
 private fun modelLabel(ctx: Context, slots: Int) =
-    CHAT_MODELS.firstOrNull { it.first == slots }?.second ?: LocalLing.name(ctx)
+    if (LocalLing.onProcessor) LocalLing.name(ctx) else CHAT_MODELS.firstOrNull { it.first == slots }?.second ?: LocalLing.name(ctx)
 
 /** Which model answers: a pill in the composer, the way chat apps place it. */
 @Composable

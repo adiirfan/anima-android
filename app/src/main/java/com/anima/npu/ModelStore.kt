@@ -145,6 +145,8 @@ class ModelStore(
         /** The first-run setup's lists: what makes pictures (and clips), and the chat models. */
         val SETUP_PICTURE = listOf(ANIMA, MOSS, FIBO, WAN, QWEN, KLEIN, KREA)
         val SETUP_CHAT = listOf(LING, SMALLCHAT)
+        /** The chat models this phone can use: without the AI chip only the small one, on the processor. */
+        val chatHere get() = if (LocalLing.onProcessor) listOf(SMALLCHAT) else SETUP_CHAT
         fun byId(id: String) = ALL.firstOrNull { it.id == id } ?: ALL.mapNotNull { it.gpu }.first { it.id == id }
     }
 

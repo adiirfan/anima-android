@@ -77,12 +77,12 @@ fun SetupScreen(firstRun: Boolean, onDone: () -> Unit) {
             else if (Chip.supported) "Choose what to download. Everything runs on this phone's neural unit (${Chip.label}); " +
                 "nothing is sent anywhere after the download. You can add or remove models later in Settings."
             else "This phone has ${Chip.label}, which has no AI chip the app supports. MOSS-Image (new pictures) and " +
-                "Fibo (picture edits) can still run on its graphics chip, more slowly. " +
+                "Fibo (picture edits) can still run on its graphics chip, more slowly, and the small chat model on its processor. " +
                 "Nothing is sent anywhere after the download.",
             style = MaterialTheme.typography.bodySmall)
 
         // each model's default build: the AI chip when this phone has one the model is built for, else the graphics chip
-        val all = (ModelStore.SETUP_PICTURE + ModelStore.SETUP_CHAT).map { it.active(ctx) }
+        val all = (ModelStore.SETUP_PICTURE + ModelStore.chatHere).map { it.active(ctx) }
         val manifests = remember { mutableStateMapOf<String, ModelStore.Manifest>() }
         var listStatus by remember { mutableStateOf("Getting the model lists…") }
         // nothing ticked until the user picks; Anima is the one most people want, so it starts ticked
@@ -140,7 +140,7 @@ fun SetupScreen(firstRun: Boolean, onDone: () -> Unit) {
         Text("Pictures and clips", style = MaterialTheme.typography.titleSmall)
         ModelStore.SETUP_PICTURE.forEach { row(it) }
         Text("Chat", style = MaterialTheme.typography.titleSmall)
-        ModelStore.SETUP_CHAT.forEach { row(it) }
+        ModelStore.chatHere.forEach { row(it) }
 
         val picked = all.filter { it.available && chosen[it.id] == true && it.installed(ctx) == null && sizeOf(it) != null }
         val total = picked.sumOf { sizeOf(it) ?: 0L }

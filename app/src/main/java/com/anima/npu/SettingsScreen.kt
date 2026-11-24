@@ -65,7 +65,10 @@ fun SettingsScreen(onSetup: () -> Unit) {
                 Triple(LocalLing.SMALL, "Lowest", "Qwen3.5 0.8B · 1.4 GB · less clever"),
             )
             var slots by remember { mutableIntStateOf(LocalLing.expertSlots(ctx)) }
-            Block {
+            if (LocalLing.onProcessor) Block {
+                RowTitle("Chat model")
+                Note("Qwen3.5 0.8B · 1.4 GB · runs on the processor, as this phone has no supported AI chip")
+            } else Block {
                 RowTitle("Chat model")
                 Segmented(choices.map { it.second }, choices.indexOfFirst { it.first == slots }) { i ->
                     val n = choices[i].first

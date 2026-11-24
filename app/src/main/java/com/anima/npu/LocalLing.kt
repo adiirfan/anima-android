@@ -22,8 +22,14 @@ object LocalLing {
     /** The "lingExperts" setting that picks the small chat model (Qwen3.5 0.8B) instead of Ling. */
     const val SMALL = -1
 
-    /** The Lowest memory setting: Qwen3.5 0.8B instead of Ling, about 1.4 GB in all instead of 2.3 to 4.9. */
-    fun small(ctx: Context) = expertSlots(ctx) == SMALL
+    /**
+     * Phones without a supported AI chip run chat on the processor: llama.cpp's graphics-chip build needs an OpenCL
+     * feature older Adreno drivers lack (the XZ3's 630 fails at load), and Ling is too big for the processor.
+     */
+    val onProcessor get() = !Chip.supported
+
+    /** The Lowest memory setting: Qwen3.5 0.8B instead of Ling, about 1.4 GB in all instead of 2.3 to 4.9. Always on the processor. */
+    fun small(ctx: Context) = onProcessor || expertSlots(ctx) == SMALL
     fun store(ctx: Context) = if (small(ctx)) ModelStore.SMALLCHAT else ModelStore.LING
     /** The chat model's name, for the screen. */
     fun name(ctx: Context) = if (small(ctx)) "Qwen3.5 0.8B" else "Ling"
@@ -79,8 +85,13 @@ object LocalLing {
         val libs = ctx.applicationInfo.nativeLibraryDir
         val cmd = listOf(
             "$libs/libllama-server.so", "-m", modelFile(ctx).absolutePath,
+        ) + (if (onProcessor) fastCores(coreMaxFreqs()).let { n ->
+            // the processor, fast cores only (for writing and for reading the prompt)
+            listOf("-ngl", "0", "-t", "$n", "-tb", "$n")
+        } else listOf(
             // the AI chip or the graphics chip; without this it quietly uses the processor
             "--device", if (onGpu) "GPUOpenCL" else "HTP0", "-ngl", "99",
+        )) + listOf(
             // one conversation at a time: the default 4 slots only cost memory
             "-c", "8192", "-np", "1",
             "--host", "127.0.0.1", "--port", PORT.toString(), "--alias", "ling",
@@ -103,7 +114,7 @@ object LocalLing {
         NativeLibs.apply(ctx, pb.environment())
         pb.environment()["ADSP_LIBRARY_PATH"] = libs
         val slots = expertSlots(ctx)
-        if (slots > 0 && !onGpu) {   // keeping only some experts is the AI chip's: the graphics chip holds them all
+        if (slots > 0 && !onGpu && !small) {   // keeping only some experts is the AI chip's: the graphics chip holds them all
             pb.environment()["GGML_HEXAGON_EXPERT_SLOTS"] = slots.toString()
             pb.environment()["GGML_HEXAGON_EXPERT_FILE"] = expertFile(ctx).absolutePath
             // Low memory stops for the chip once per layer to see which experts it picked; watching for the answer

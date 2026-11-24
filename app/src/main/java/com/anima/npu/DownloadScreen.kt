@@ -63,7 +63,8 @@ fun DownloadScreen(
         if (onBack != null) TextButton(onClick = onBack) { Text("‹ Back") }
         Text((if (current == null) "Download " else if (update) "Update " else "Change ") + store.title,
             style = MaterialTheme.typography.headlineSmall)
-        Text("Everything runs on the phone's " + (if (store.onGraphicsChip) "graphics chip" else "neural unit") +
+        val processor = store in ModelStore.SETUP_CHAT && LocalLing.onProcessor
+        Text("Everything runs on the phone's " + (if (processor) "processor" else if (store.onGraphicsChip) "graphics chip" else "neural unit") +
             "; nothing is sent anywhere after this download.",
             style = MaterialTheme.typography.bodySmall)
         val m = manifest
@@ -81,7 +82,9 @@ fun DownloadScreen(
                         RadioButton(selected = choice == v.id, onClick = { choice = v.id }, enabled = pickable)
                         Column(Modifier.padding(start = 8.dp)) {
                             Text(v.label + if (v.id == current) " (installed)" else "", style = MaterialTheme.typography.titleMedium)
-                            Text(v.about, style = MaterialTheme.typography.bodySmall)
+                            // the list online names the AI chip; on these phones it runs on the processor
+                            Text(if (processor) v.about.replace("on the AI chip", "on the processor") else v.about,
+                                style = MaterialTheme.typography.bodySmall)
                             Text("Download: ${gb(size)}", style = MaterialTheme.typography.bodySmall)
                         }
                     }

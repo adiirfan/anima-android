@@ -74,7 +74,7 @@ class ChatController(ctx: Context) {
         // a picture already drawing finishes first (the gate puts the chat before the queue's next one)
         NpuGate.gate.withChat {
             if (!LocalLing.running()) {
-                val first = LocalLing.expertSlots(app) > 0 && !File(LocalLing.expertFile(app).path + ".done").isFile
+                val first = !LocalLing.small(app) && LocalLing.expertSlots(app) > 0 && !File(LocalLing.expertFile(app).path + ".done").isFile
                 _state.value = TurnState(id, if (first) "preparing" else "loading", "", "")
                 // The picture models stay loaded after a picture (2.7 GB on the AI chip). With Ling's 4.5 GB on top,
                 // a 12 GB phone ran out and Android closed the app while on screen: it cannot close Ling's server,
@@ -153,7 +153,8 @@ class ChatController(ctx: Context) {
                     if (wantsEdit && target.first != null) runCatching { JSONObject(k.args.toString()).put("edit", true).toString() }
                         .getOrDefault(k.args.toString()) else k.args.toString(),
                     target.second, ModelStore.QWEN.installed(app) == "standard",
-                    ModelStore.PICTURE.filter { it.installed(app) != null }.map { it.id }.toSet())) {
+                    // the copy the queue draws with: phones without the AI chip have only the graphics-chip one
+                    ModelStore.PICTURE.filter { it.active(app).installed(app) != null }.map { it.id }.toSet())) {
                 is ToolCheck.Ok -> {
                     val jobs = enqueueFromChat(id, r.args, if (r.args.edit) target.first else null)
                     jobs.forEach { j -> append(id, Msg.Picture(newId(), j.id)) }

@@ -60,7 +60,7 @@ fun ModelsScreen(onChanged: () -> Unit, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     BackHandler(onBack = onBack)
     // every model is listed: one with no build for this phone says so instead of quietly missing
-    val models = ModelStore.SETUP_PICTURE + ModelStore.SETUP_CHAT
+    val models = ModelStore.SETUP_PICTURE + ModelStore.chatHere
     val builds = models.flatMap { listOfNotNull(it.takeIf { m -> m.aiChip }, it.gpu?.takeIf { g -> g.available }) }
     val manifests = remember { mutableStateMapOf<String, ModelStore.Manifest>() }
     val fresh = remember { mutableStateMapOf<String, Boolean>() }   // the list came from Hugging Face just now (updates only then)
@@ -129,7 +129,9 @@ fun ModelsScreen(onChanged: () -> Unit, onBack: () -> Unit) {
                     Text(model.title, style = MaterialTheme.typography.titleMedium)
                     val g = model.gpu?.takeIf { it.available }
                     // every model shows the choice; a side with no build yet is greyed out and says so
-                    run {
+                    if (model in ModelStore.SETUP_CHAT && LocalLing.onProcessor)
+                        Text("Runs on this phone's processor.", style = MaterialTheme.typography.bodySmall)
+                    else run {
                         Text(if (model in ModelStore.SETUP_CHAT) "Runs on" else "Draws on", style = MaterialTheme.typography.labelMedium)
                         val sides = listOf(false, true)
                         fun exists(on: Boolean) = if (on) g != null || model.sameFilesOnGpu else model.aiChip
