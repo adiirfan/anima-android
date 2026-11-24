@@ -35,14 +35,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
-/** The app's settings: which models to download, Ling's memory use and the usage bar. */
+/** The app's settings: which models to download, Ling's memory use, the graphics engine and the usage bar. */
 @Composable
 fun SettingsScreen(onSetup: () -> Unit) {
     val ctx = LocalContext.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Models", style = MaterialTheme.typography.titleSmall)
-        if (!Chip.supported) Text("${Chip.label}: no AI chip support, models run on the graphics chip.",
+        if (!Chip.supported && !Chip.animaOnly) Text("${Chip.label}: no AI chip support, models run on the graphics chip.",
             style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = onSetup) { Text("Model Management") }
 
@@ -66,6 +66,24 @@ fun SettingsScreen(onSetup: () -> Unit) {
             }
         }
         Text(choices.first { it.first == slots }.third, style = MaterialTheme.typography.bodySmall)
+
+        HorizontalDivider()
+
+        Text("Graphics engine", style = MaterialTheme.typography.titleSmall)
+        val engines = listOf("Automatic", "OpenCL", "Vulkan")
+        var engine by remember { mutableIntStateOf(GpuEngine.engineChoice(ctx)) }
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            engines.forEachIndexed { i, label ->
+                SegmentedButton(selected = engine == i, onClick = {
+                    if (engine != i) { engine = i; GpuEngine.setEngineChoice(ctx, i) }
+                }, shape = SegmentedButtonDefaults.itemShape(i, engines.size)) { Text(label, maxLines = 1) }
+            }
+        }
+        Text(when (engine) {
+            1 -> "OpenCL draws every model on the graphics chip."
+            2 -> "Vulkan draws ${GpuEngine.VULKAN_MODELS}; other models use OpenCL. If Vulkan fails on this phone, OpenCL takes over."
+            else -> "Vulkan draws ${GpuEngine.VULKAN_MODELS} on the Snapdragon 8 Elite Gen 5, about 1.5× faster; everything else uses OpenCL."
+        }, style = MaterialTheme.typography.bodySmall)
 
         HorizontalDivider()
 

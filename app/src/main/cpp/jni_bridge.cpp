@@ -5,6 +5,7 @@
 #include <string>
 
 #include "klein.h"
+#include "krea.h"
 #include "pipeline.h"
 #include "qimg.h"
 #include "fibo.h"
@@ -15,6 +16,8 @@ namespace {
 Pipeline g_pipe;
 KleinPipeline g_klein;
 KleinResult g_kleinLast;
+KreaPipeline g_krea;      // Krea 2 Turbo (krea.h)
+KreaResult g_kreaLast;
 QwenImage* g_qimg = nullptr;   // created on first use (the class maps its word table in init)
 QimgResult g_qimgLast;
 Fibo* g_fibo = nullptr;        // Fibo 2.0 edit, created on first use
@@ -198,6 +201,48 @@ JNIEXPORT void JNICALL Java_com_anima_npu_Engine_kleinSetMemoryMode(JNIEnv*, job
     g_klein.setMemoryMode(m);
 }
 
+// ---- Krea 2 Turbo (krea.h): its own model folder, 768x768, 8 fixed steps ----
+
+JNIEXPORT jstring JNICALL Java_com_anima_npu_Engine_kreaInit(JNIEnv* env, jobject, jstring modelDir, jstring libDir) {
+    std::lock_guard<std::mutex> l(g_mu);
+    std::string err;
+    if (!g_krea.init(str(env, modelDir), str(env, libDir), &err)) return env->NewStringUTF(err.c_str());
+    return nullptr;
+}
+
+// width*height ARGB pixels, or null (see lastError). ids: the whole Krea template (KreaTokens).
+JNIEXPORT jintArray JNICALL Java_com_anima_npu_Engine_kreaGenerate(JNIEnv* env, jobject, jintArray ids, jlong seed,
+                                                                    jint width, jint height, jobject progress) {
+    std::lock_guard<std::mutex> l(g_mu);
+    KreaRequest req;
+    req.ids = ints(env, ids);
+    req.seed = (uint64_t)seed;
+    req.width = width;
+    req.height = height;
+    jmethodID onStep = env->GetMethodID(env->GetObjectClass(progress), "onStep", "(II)V");
+    g_pipe.release();      // one model on the neural unit at a time
+    g_klein.release();
+    if (g_qimg) g_qimg->release();
+    if (g_fibo) g_fibo->release();
+    if (g_moss) g_moss->release();
+    if (g_wan) g_wan->release();
+    g_kreaLast = g_krea.generate(req, [&](int i, int n) { env->CallVoidMethod(progress, onStep, i, n); });
+    g_error = g_kreaLast.error;
+    if (g_releaseLater) { g_pipe.release(); g_krea.release(); g_releaseLater = false; }
+    if (!g_error.empty()) return nullptr;
+    jintArray out = env->NewIntArray((jsize)g_kreaLast.argb.size());
+    env->SetIntArrayRegion(out, 0, (jsize)g_kreaLast.argb.size(), reinterpret_cast<const jint*>(g_kreaLast.argb.data()));
+    return out;
+}
+
+// [waiting for block files ms, prompt ms, drawing ms, decode ms] of the last Krea picture.
+JNIEXPORT jdoubleArray JNICALL Java_com_anima_npu_Engine_kreaTimes(JNIEnv* env, jobject) {
+    double t[4] = {g_kreaLast.msWait, g_kreaLast.msText, g_kreaLast.msDraw, g_kreaLast.msDecode};
+    jdoubleArray r = env->NewDoubleArray(4);
+    env->SetDoubleArrayRegion(r, 0, 4, t);
+    return r;
+}
+
 // ---- Qwen-Image 2.1 turbo (qimg.h): its own model folder, 768x768, optional picture to edit ----
 
 JNIEXPORT jstring JNICALL Java_com_anima_npu_Engine_qwenInit(JNIEnv* env, jobject, jstring modelDir, jstring libDir, jstring drawDir) {
@@ -218,6 +263,7 @@ JNIEXPORT jintArray JNICALL Java_com_anima_npu_Engine_qwenGenerate(JNIEnv* env, 
     if (!g_qimg) { g_error = "Qwen-Image is not started"; return nullptr; }
     g_pipe.release();      // one model on the neural unit at a time
     g_klein.release();
+    g_krea.release();
     if (g_fibo) g_fibo->release();
     if (g_moss) g_moss->release();
     if (g_wan) g_wan->release();
@@ -262,6 +308,7 @@ JNIEXPORT void JNICALL Java_com_anima_npu_Engine_release(JNIEnv*, jobject) {
     if (!l.owns_lock()) { g_releaseLater = true; return; }
     g_pipe.release();
     g_klein.release();
+    g_krea.release();
     if (g_qimg) g_qimg->release();
     if (g_fibo) g_fibo->release();
     if (g_moss) g_moss->release();
@@ -287,6 +334,7 @@ JNIEXPORT jintArray JNICALL Java_com_anima_npu_Engine_fiboGenerate(JNIEnv* env, 
     if (!g_fibo) { g_error = "Fibo is not started"; return nullptr; }
     g_pipe.release();      // one model on the neural unit at a time
     g_klein.release();
+    g_krea.release();
     if (g_qimg) g_qimg->release();
     std::vector<int32_t> e = ints(env, edit);
     if (e.size() != 768u * 768u) { g_error = "Fibo edits 768x768 pictures only"; return nullptr; }
@@ -334,6 +382,7 @@ JNIEXPORT jintArray JNICALL Java_com_anima_npu_Engine_mossGenerate(JNIEnv* env, 
     if (!g_moss) { g_error = "MOSS is not started"; return nullptr; }
     g_pipe.release();      // one model on the neural unit at a time
     g_klein.release();
+    g_krea.release();
     if (g_qimg) g_qimg->release();
     if (g_fibo) g_fibo->release();
     if (g_wan) g_wan->release();
@@ -383,6 +432,7 @@ JNIEXPORT jintArray JNICALL Java_com_anima_npu_Engine_wanGenerate(JNIEnv* env, j
     if (!g_wan) { g_error = "Wan is not started"; return nullptr; }
     g_pipe.release();      // one model on the neural unit at a time
     g_klein.release();
+    g_krea.release();
     if (g_qimg) g_qimg->release();
     if (g_fibo) g_fibo->release();
     if (g_moss) g_moss->release();

@@ -11,7 +11,7 @@ android {
     ndkVersion = "28.2.13676358"
     defaultConfig {
         applicationId = "com.anima.npu"
-        minSdk = 31
+        minSdk = 28
         targetSdk = 36
         // Build time in seconds: grows with every build and doubles as Android's version code (limit 2.1e9,
         // reached in 2036). publish-app.sh passes it as -PappBuild; a plain build gets 0 and never offers itself.

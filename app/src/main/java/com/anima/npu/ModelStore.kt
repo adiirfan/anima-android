@@ -28,6 +28,9 @@ class ModelStore(
     /** The same downloaded files run on either chip (the chat models: llama.cpp reads them on the AI chip or the
      *  graphics chip), so there is no separate graphics-chip download. */
     val sameFilesOnGpu: Boolean = false,
+    /** The file lists for the Snapdragon 8 Gen 3 (v75) and 8 Gen 2 (v73), for the models built for them (Anima). */
+    private val gen3Url: String? = null,
+    private val gen2Url: String? = null,
 ) {
     /**
      * Where this build's file list is, or null when there is none for this phone: the AI-chip build of the phone's
@@ -37,6 +40,9 @@ class ModelStore(
         get() = if (onGpu) gpuUrl else when (Chip.kind) {
             Chip.Kind.ELITE -> eliteUrl
             Chip.Kind.ELITE_GEN5 -> gen5Url
+            // the chat models' llama.cpp has no AI-chip support for these chips: their files run on the graphics chip
+            Chip.Kind.GEN3 -> if (sameFilesOnGpu) eliteUrl else gen3Url
+            Chip.Kind.GEN2 -> if (sameFilesOnGpu) eliteUrl else gen2Url
             Chip.Kind.UNSUPPORTED -> if (sameFilesOnGpu) eliteUrl else null
         }
 
@@ -55,7 +61,7 @@ class ModelStore(
     }
 
     /** The AI-chip build exists for this phone (shown as a choice only then). */
-    val aiChip get() = !onGpu && manifestUrl != null && !(sameFilesOnGpu && Chip.kind == Chip.Kind.UNSUPPORTED)
+    val aiChip get() = !onGpu && manifestUrl != null && !(sameFilesOnGpu && !Chip.supported)
 
     /** This phone can run the model one way or the other. */
     val offered get() = available || gpu?.available == true
@@ -79,7 +85,7 @@ class ModelStore(
     }
 
     /** The build that draws: this one or its graphics-chip twin. */
-    fun active(ctx: Context): ModelStore = if (runsOnGpu(ctx)) gpu!! else this
+    fun active(ctx: Context): ModelStore = if (runsOnGpu(ctx)) gpu ?: this else this   // chat models: same files, no twin
 
     companion object {
         private const val HF = "https://huggingface.co/sebekblessing"
@@ -90,33 +96,41 @@ class ModelStore(
             "Anima is licensed for non-commercial use (CircleStone Labs Non-Commercial License). Pictures you make may be used for anything.",
             // multi-size + guide set; manifest.json stays for older app builds
             "$HF/anima-qnn-8elite/resolve/main/manifest2.json", "$HF/anima-qnn-8elite-gen5/resolve/main/manifest2.json", "",
-            "$HF/anima-gpu/resolve/main/manifest.json")
+            // manifest2: the drawing file in scale blocks of 256 (the Vulkan engine's fast layout); manifest.json keeps
+            // the blocks-of-64 file for older app builds, whose graphics engine reads only that
+            "$HF/anima-gpu/resolve/main/manifest2.json",
+            gen3Url = "$HF/anima-qnn-8gen3/resolve/main/manifest2.json", gen2Url = "$HF/anima-qnn-8gen2/resolve/main/manifest2.json")
         val KLEIN = ModelStore(
             "klein", "FLUX.2 klein 4B",
             "FLUX.2 [klein] 4B is released by Black Forest Labs under the Apache 2.0 licence.",
             "$HF/klein-4b-qnn-8elite/resolve/main/manifest.json", "$HF/klein-4b-qnn-8elite-gen5/resolve/main/manifest.json", "klein/",
-            "$HF/klein-4b-gpu/resolve/main/manifest.json")
+            "$HF/klein-4b-gpu/resolve/main/manifest2.json")   // manifest2: the Vulkan layout (256-input blocks), as Anima
+        val KREA = ModelStore(
+            "krea", "Krea 2 Turbo",
+            "Krea 2 is released by Krea under the Krea 2 Community License.",
+            "$HF/krea-2-turbo-qnn-8elite/resolve/main/manifest.json", "$HF/krea-2-turbo-qnn-8elite-gen5/resolve/main/manifest.json", "krea/",
+            "$HF/krea-2-turbo-gpu/resolve/main/manifest.json")
         val QWEN = ModelStore(
             "qwen", "Qwen-Image 2.1",
             "Qwen-Image 2.1 is released under the Qwen Research License: non-commercial use only. Built with Qwen.",
             "$HF/qwen-image-2.1-qnn-8elite/resolve/main/manifest.json", "$HF/qwen-image-2.1-qnn-8elite-gen5/resolve/main/manifest.json", "qwen/",
-            "$HF/qwen-image-2.1-gpu/resolve/main/manifest.json")
+            "$HF/qwen-image-2.1-gpu/resolve/main/manifest2.json")
         val FIBO = ModelStore(
             "fibo", "Fibo 2.0 edit",
             "Fibo 2.0 is released by Bria under CC BY-NC 4.0: non-commercial use only.",
             "$HF/fibo-qnn-8elite/resolve/main/manifest.json", "$HF/fibo-qnn-8elite-gen5/resolve/main/manifest.json", "fibo/",
-            "$HF/fibo-gpu/resolve/main/manifest.json")
+            "$HF/fibo-gpu/resolve/main/manifest2.json")
         val MOSS = ModelStore(
             "moss", "MOSS-Image",
             "MOSS-Image and its 8-step add-on are released under the Apache 2.0 licence.",
             "$HF/moss-qnn-8elite/resolve/main/manifest.json", "$HF/moss-qnn-8elite-gen5/resolve/main/manifest.json", "moss/",
-            "$HF/moss-gpu/resolve/main/manifest.json")
+            "$HF/moss-gpu/resolve/main/manifest2.json")   // manifest2: the Vulkan layout (256-input blocks), as Anima
         val WAN = ModelStore(
             "wan", "Wan 2.2 clips",
             "Wan 2.2 (Alibaba), its LightTAE decoder and the umT5 prompt reader are released under the Apache 2.0 " +
                 "licence. The Turbo version's page names no licence.",
             "$HF/wan22-qnn-8elite/resolve/main/manifest.json", "$HF/wan22-qnn-8elite-gen5/resolve/main/manifest.json", "wan/",
-            "$HF/wan22-gpu/resolve/main/manifest.json")
+            "$HF/wan22-gpu/resolve/main/manifest2.json")
         val LING = ModelStore(
             "ling", "Ling-3.0-tiny (chat)",
             "Ling-3.0-tiny is released by inclusionAI under the MIT licence.",
@@ -125,11 +139,11 @@ class ModelStore(
             "smallchat", "Qwen3.5 0.8B (small chat)",
             "Qwen3.5 0.8B is released by the Qwen team (Alibaba) under the Apache 2.0 licence.",
             "$CHAT/smallchat/manifest.json", "$CHAT/smallchat/manifest.json", "smallchat/", sameFilesOnGpu = true)
-        val ALL = listOf(ANIMA, KLEIN, QWEN, FIBO, MOSS, WAN, LING, SMALLCHAT)
+        val ALL = listOf(ANIMA, KLEIN, KREA, QWEN, FIBO, MOSS, WAN, LING, SMALLCHAT)
         /** The picture models, for the Create screen's picker. */
-        val PICTURE = listOf(ANIMA, KLEIN, QWEN, FIBO, MOSS)
+        val PICTURE = listOf(ANIMA, KLEIN, KREA, QWEN, FIBO, MOSS)
         /** The first-run setup's lists: what makes pictures (and clips), and the chat models. */
-        val SETUP_PICTURE = listOf(ANIMA, MOSS, FIBO, WAN, QWEN, KLEIN)
+        val SETUP_PICTURE = listOf(ANIMA, MOSS, FIBO, WAN, QWEN, KLEIN, KREA)
         val SETUP_CHAT = listOf(LING, SMALLCHAT)
         fun byId(id: String) = ALL.firstOrNull { it.id == id } ?: ALL.mapNotNull { it.gpu }.first { it.id == id }
     }
@@ -259,6 +273,27 @@ class ModelStore(
         return out
     }
 
+    /** This app's transfers in Android's download service that have not failed: (id, address, status). */
+    private fun ours(ctx: Context): List<Triple<Long, String, Int>> {
+        val out = ArrayList<Triple<Long, String, Int>>()
+        dm(ctx).query(DownloadManager.Query().setFilterByStatus(DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or
+            DownloadManager.STATUS_PAUSED or DownloadManager.STATUS_SUCCESSFUL)).use { c ->
+            val idCol = c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
+            val uCol = c.getColumnIndexOrThrow(DownloadManager.COLUMN_URI)
+            val sCol = c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
+            while (c.moveToNext()) out += Triple(c.getLong(idCol), c.getString(uCol) ?: "", c.getInt(sCol))
+        }
+        return out
+    }
+
+    /** Where Android saved download [id], if it says. */
+    private fun localFile(ctx: Context, id: Long): File? =
+        dm(ctx).query(DownloadManager.Query().setFilterById(id)).use { c ->
+            if (!c.moveToFirst()) return null
+            val u = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI)) ?: return null
+            Uri.parse(u).path?.let { File(it) }?.takeIf { it.isFile }
+        }
+
     private suspend fun waitFor(ctx: Context, ids: List<Long>, onBytes: (Long) -> Unit) {
         while (true) {
             val q = query(ctx, ids)
@@ -274,9 +309,12 @@ class ModelStore(
     suspend fun fetchManifest(ctx: Context): Manifest {
         modelDir(ctx).mkdirs()
         val url = manifestUrl ?: error("$title is not available for ${Chip.label}")
+        // strays from checks that overlapped: Android saves under "manifest.json-1.part" when the name is taken
+        modelDir(ctx).listFiles()?.filter { Regex("manifest\\.json-\\d+\\.part").matches(it.name) }?.forEach { it.delete() }
         val id = enqueue(ctx, url, "manifest.json.part", "$title model list")
         waitFor(ctx, listOf(id)) {}
-        val part = File(modelDir(ctx), "manifest.json.part")
+        // the file Android actually wrote (another check of the same model may have held the usual name)
+        val part = localFile(ctx, id) ?: File(modelDir(ctx), "manifest.json.part")
         val m = parse(part.readText())
         part.renameTo(manifestFile(ctx))
         return m
@@ -309,7 +347,15 @@ class ModelStore(
             !(have.length() == f.size && sameSha && (!switching || f in m.shared))
         }
         val total = need.sumOf { it.size }
-        val ids = need.map { enqueue(ctx, m.base + it.path, it.name + ".part", "$title: ${it.name}") }
+        // Android's download service keeps going when the app is closed or updated: a transfer of the same file that
+        // is still alive (started before the app restarted, by this build or an older one) is picked up, not redone
+        val live = ours(ctx)
+        val ids = need.map { f ->
+            val url = m.base + f.path
+            val part = File(dir, f.name + ".part")
+            live.firstOrNull { (_, u, st) -> u == url && (st != DownloadManager.STATUS_SUCCESSFUL || part.length() == f.size) }?.first
+                ?: enqueue(ctx, url, f.name + ".part", "$title: ${f.name}")
+        }
         try {
             waitFor(ctx, ids) { progress(it, total, "Downloading") }
         } catch (e: Exception) {

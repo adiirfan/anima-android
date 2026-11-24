@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Size
@@ -40,20 +41,50 @@ object Gallery {
         index(ctx).writeText(a.toString())
     }
 
+    /** Android 9 and older have no RELATIVE_PATH / IS_PENDING: the file goes straight into Pictures/Anima (with the
+     *  storage permission asked for at start) and is registered by its path. */
+    private val legacy get() = Build.VERSION.SDK_INT < 29
+
+    /** A new, empty entry in the phone's picture list, in Pictures/Anima. */
+    private fun create(ctx: Context, collection: Uri, name: String, mime: String, what: String): Uri {
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            if (legacy) {
+                if (listOf(android.Manifest.permission.READ_EXTERNAL_STORAGE, android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        .any { ctx.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED })
+                    error("Anima needs storage access to save to your Pictures folder on this Android version: allow Storage for Anima in the phone's Settings, Apps")
+                @Suppress("DEPRECATION")
+                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Anima")
+                if (!dir.isDirectory && !dir.mkdirs()) error("could not make the folder $dir")
+                @Suppress("DEPRECATION") put(MediaStore.MediaColumns.DATA, File(dir, name).absolutePath)
+            } else {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Anima")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+        }
+        return ctx.contentResolver.insert(collection, values) ?: error("could not create the $what file")
+    }
+
+    /** The file is written: show it to other apps (newer Android) or have its size and dimensions read (older). */
+    private fun finish(ctx: Context, uri: Uri) {
+        if (!legacy) {
+            ctx.contentResolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            return
+        }
+        @Suppress("DEPRECATION")
+        val path = runCatching {
+            ctx.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.getOrNull() ?: return
+        android.media.MediaScannerConnection.scanFile(ctx, arrayOf(path), null, null)
+    }
+
     fun save(ctx: Context, bmp: Bitmap, prompt: String, seed: Long, steps: Int, ms: Long): Entry {
         val now = System.currentTimeMillis()
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "anima_${now}_$seed.png")
-            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Anima")
-            put(MediaStore.Images.Media.IS_PENDING, 1)
-        }
         val r = ctx.contentResolver
-        val uri = r.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("could not create the picture file")
+        val uri = create(ctx, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "anima_${now}_$seed.png", "image/png", "picture")
         r.openOutputStream(uri)!!.use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        values.clear()
-        values.put(MediaStore.Images.Media.IS_PENDING, 0)
-        r.update(uri, values, null, null)
+        finish(ctx, uri)
         val e = Entry(uri, prompt, seed, steps, ms, bmp.width, now, bmp.height)
         write(ctx, read(ctx).apply { add(0, e) })
         return e
@@ -62,18 +93,10 @@ object Gallery {
     /** A clip as a looping GIF in Pictures/Anima; [frames]: w*h ARGB each. The entry's size is one frame's. */
     fun saveGif(ctx: Context, frames: List<IntArray>, w: Int, h: Int, prompt: String, seed: Long, steps: Int, ms: Long): Entry {
         val now = System.currentTimeMillis()
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "anima_${now}_$seed.gif")
-            put(MediaStore.Images.Media.MIME_TYPE, "image/gif")
-            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Anima")
-            put(MediaStore.Images.Media.IS_PENDING, 1)
-        }
         val r = ctx.contentResolver
-        val uri = r.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("could not create the clip file")
+        val uri = create(ctx, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "anima_${now}_$seed.gif", "image/gif", "clip")
         r.openOutputStream(uri)!!.use { GifWriter.write(it, frames, w, h) }
-        values.clear()
-        values.put(MediaStore.Images.Media.IS_PENDING, 0)
-        r.update(uri, values, null, null)
+        finish(ctx, uri)
         val e = Entry(uri, prompt, seed, steps, ms, w, now, h)
         write(ctx, read(ctx).apply { add(0, e) })
         return e
@@ -82,14 +105,8 @@ object Gallery {
     /** A clip as an MP4 video in Pictures/Anima ([VideoWriter]); [frames]: w*h ARGB each. The entry's size is a frame's. */
     fun saveVideo(ctx: Context, frames: List<IntArray>, w: Int, h: Int, prompt: String, seed: Long, steps: Int, ms: Long): Entry {
         val now = System.currentTimeMillis()
-        val values = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "anima_${now}_$seed.mp4")
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Anima")
-            put(MediaStore.Video.Media.IS_PENDING, 1)
-        }
         val r = ctx.contentResolver
-        val uri = r.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: error("could not create the clip file")
+        val uri = create(ctx, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "anima_${now}_$seed.mp4", "video/mp4", "clip")
         try {
             r.openFileDescriptor(uri, "rw")!!.use {
                 // long clips (3 s, 49 frames) play once at 16 per second as made; short ones keep the old back-and-forth loop
@@ -99,9 +116,7 @@ object Gallery {
         } catch (t: Throwable) {
             runCatching { r.delete(uri, null, null) }; throw t
         }
-        values.clear()
-        values.put(MediaStore.Video.Media.IS_PENDING, 0)
-        r.update(uri, values, null, null)
+        finish(ctx, uri)
         val e = Entry(uri, prompt, seed, steps, ms, w, now, h)
         write(ctx, read(ctx).apply { add(0, e) })
         return e
@@ -131,8 +146,11 @@ object Gallery {
         val all = read(ctx)
         val ids = HashSet<String>()
         val asked = runCatching {
+            @Suppress("DEPRECATION")
+            val (where, arg) = if (legacy) "${MediaStore.MediaColumns.DATA} LIKE ?" to "%/" + Environment.DIRECTORY_PICTURES + "/Anima/%"
+                else "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?" to Environment.DIRECTORY_PICTURES + "/Anima%"
             ctx.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Images.Media._ID),
-                "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?", arrayOf(Environment.DIRECTORY_PICTURES + "/Anima%"), null)?.use { c ->
+                where, arrayOf(arg), null)?.use { c ->
                 while (c.moveToNext()) ids.add(c.getLong(0).toString())
             } != null
         }.getOrDefault(false)
@@ -166,8 +184,21 @@ object Gallery {
 
     fun thumbnail(ctx: Context, e: Entry, px: Int): Bitmap? {
         cachedThumbnail(e, px)?.let { return it }
-        return runCatching { ctx.contentResolver.loadThumbnail(e.uri, Size(px, px), null) }.getOrNull()
-            ?.also { thumbs.put("${e.uri}@$px", it) }
+        return runCatching { if (legacy) legacyThumbnail(ctx, e, px) else ctx.contentResolver.loadThumbnail(e.uri, Size(px, px), null) }
+            .getOrNull()?.also { thumbs.put("${e.uri}@$px", it) }
+    }
+
+    /** Android 9: a preview read at a fraction of the picture's size (a clip's first frame, shrunk). */
+    private fun legacyThumbnail(ctx: Context, e: Entry, px: Int): Bitmap? {
+        if (isVideo(ctx, e)) return android.media.MediaMetadataRetriever().run {
+            try { setDataSource(ctx, e.uri); getFrameAtTime(0) } finally { release() }
+        }?.let { b -> val k = px.toFloat() / maxOf(b.width, b.height); if (k >= 1f) b else Bitmap.createScaledBitmap(b, maxOf(1, (b.width * k).toInt()), maxOf(1, (b.height * k).toInt()), true) }
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        ctx.contentResolver.openInputStream(e.uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, o) }
+        var sample = 1
+        while (maxOf(o.outWidth, o.outHeight) / (sample * 2) >= px) sample *= 2
+        val o2 = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        return ctx.contentResolver.openInputStream(e.uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, o2) }
     }
 
     /** The picture for viewing: a 3072-pixel upscale is read at half or quarter size (no screen shows more, and the

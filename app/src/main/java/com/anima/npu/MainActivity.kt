@@ -109,16 +109,17 @@ class CreateState {
     var qwenDrawing by mutableStateOf("qwen")  // Qwen's drawing model: "qwen" (Qwen-Image 2.1) or "noctq" (qwen/noctq/)
     var animaPrompt by mutableStateOf("masterpiece, best quality, safe, 1girl, solo, long hair, smile, cherry blossoms, outdoors")
     var kleinPrompt by mutableStateOf("a cozy coffee shop interior with plants, warm light, people chatting, film photography")
+    var kreaPrompt by mutableStateOf("a red fox sitting in fresh snow, morning light, photo")
     var qwenPrompt by mutableStateOf("A digital painting of a knight in silver armor holding a glowing sword in a dark forest, dramatic lighting.")
     var fiboPrompt by mutableStateOf("Make the sky stormy and dark")
     var mossPrompt by mutableStateOf("A lighthouse on a rocky cliff at sunset, waves crashing below, warm golden light.")
     var wanPrompt by mutableStateOf("She smiles and turns her head slowly toward the camera, her hair moving in a light breeze.")
     var prompt: String
-        get() = when (model) { "klein" -> kleinPrompt; "qwen" -> qwenPrompt; "fibo" -> fiboPrompt; "moss" -> mossPrompt; "wan" -> wanPrompt; else -> animaPrompt }
-        set(v) { when (model) { "klein" -> kleinPrompt = v; "qwen" -> qwenPrompt = v; "fibo" -> fiboPrompt = v; "moss" -> mossPrompt = v; "wan" -> wanPrompt = v; else -> animaPrompt = v } }
+        get() = when (model) { "klein" -> kleinPrompt; "krea" -> kreaPrompt; "qwen" -> qwenPrompt; "fibo" -> fiboPrompt; "moss" -> mossPrompt; "wan" -> wanPrompt; else -> animaPrompt }
+        set(v) { when (model) { "klein" -> kleinPrompt = v; "krea" -> kreaPrompt = v; "qwen" -> qwenPrompt = v; "fibo" -> fiboPrompt = v; "moss" -> mossPrompt = v; "wan" -> wanPrompt = v; else -> animaPrompt = v } }
     /** Puts back each model's saved prompt; [saved] gives the stored text for a model id, or null for none. */
     fun restorePrompts(saved: (String) -> String?) {
-        saved("anima")?.let { animaPrompt = it }; saved("klein")?.let { kleinPrompt = it }; saved("qwen")?.let { qwenPrompt = it }
+        saved("anima")?.let { animaPrompt = it }; saved("klein")?.let { kleinPrompt = it }; saved("krea")?.let { kreaPrompt = it }; saved("qwen")?.let { qwenPrompt = it }
         saved("fibo")?.let { fiboPrompt = it }; saved("moss")?.let { mossPrompt = it }; saved("wan")?.let { wanPrompt = it }
     }
     var edit by mutableStateOf<Bitmap?>(null)  // Klein / Qwen: the picture to change (cropped per size); null = new picture
@@ -182,15 +183,20 @@ const val NOCTQ_DIR = "noctq"
 const val FIBO_TIME = "edits only · 4 steps · about 1 min 30 s"   // Fibo 2.0 edit-turbo, iQOO 13 2026-11-06
 const val MOSS_TIME = "8 steps · about 1 min 30 s"   // MOSS-Image SFT + 8-step DMD add-on, iQOO 13 2026-11-06
 /** The models that draw one 768x768 size only, with no size or memory choices. */
-val BIG_MODELS = setOf("qwen", "fibo", "moss", "wan")
+val BIG_MODELS = setOf("qwen", "fibo", "moss", "wan", "krea")
 const val WAN_TIME = "17 frames, a looping video · about 2.5 min on the iQOO 13"
 const val WAN_LONG_TIME = "49 frames, a 3-second video · about 3.5 min"   // the Fold, 2026-11-18 (206 s)
+const val WAN_GPU_TIME = "49 frames, a 3-second video · about 4.5 min on the graphics chip"   // the Fold on Vulkan, 2026-11-24 (227-270 s)
 const val MOSS_GPU_TIME = "8 steps · about 4 min on the graphics chip"   // the Fold in the app, 2026-11-19 (232 s)
-const val FIBO_GPU_TIME = "edits only · 4 steps · about 9 min on the graphics chip"   // the Fold in the app, 2026-11-19 (532 s)
+const val FIBO_GPU_TIME = "edits only · 4 steps · about 6 min on the graphics chip"   // the Fold in the app, 2026-11-24: 4-bit file on OpenCL, 331 s of steps
 
-/** The clip length the phone's Wan files make: frames.txt says 49 for the 3-second set, none means 17. */
+/**
+ * The clip length the phone's Wan files make: on the graphics chip always 49 frames; on the AI chip frames.txt says 49
+ * for the 3-second set, none means 17.
+ */
 fun wanTime(ctx: android.content.Context) =
-    if (java.io.File(ModelStore.WAN.modelDir(ctx), "frames.txt").takeIf { it.isFile }?.readText()?.trim() == "49") WAN_LONG_TIME else WAN_TIME
+    if (GpuEngine.useForWan(ctx)) WAN_GPU_TIME
+    else if (java.io.File(ModelStore.WAN.modelDir(ctx), "frames.txt").takeIf { it.isFile }?.readText()?.trim() == "49") WAN_LONG_TIME else WAN_TIME
 val SHAPES = listOf("Square", "Tall 9:16", "Wide 16:9")
 private val SIZES = listOf(
     listOf(512 to 512, 384 to 672, 672 to 384),
@@ -256,9 +262,14 @@ class MainActivity : ComponentActivity() {
         }
         // the old Settings switch "Draw MOSS and Fibo with the graphics chip" becomes each model's own choice
         getSharedPreferences("anima", MODE_PRIVATE).let { p ->
-            if (p.contains("gpuEngine")) {
-                if (p.getBoolean("gpuEngine", false)) listOf(ModelStore.MOSS, ModelStore.FIBO).forEach { it.setRunsOnGpu(this, true) }
-                p.edit().remove("gpuEngine").apply()
+            // only the old on/off value (a test build briefly kept the engine choice, a number, under this name)
+            when (val old = p.all["gpuEngine"]) {
+                null -> {}
+                is Boolean -> {
+                    if (old) listOf(ModelStore.MOSS, ModelStore.FIBO).forEach { it.setRunsOnGpu(this, true) }
+                    p.edit().remove("gpuEngine").apply()
+                }
+                else -> p.edit().remove("gpuEngine").apply()
             }
         }
         val libDir = applicationInfo.nativeLibraryDir
@@ -269,8 +280,14 @@ class MainActivity : ComponentActivity() {
         Engines.init(this, if (memOverride >= 0) memOverride else if (selfTest) 1 else -1, loadOpts)
         Queue.init(this)
         openUri.value = intent.getStringExtra("openUri")
-        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
-            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        // notifications are a permission from Android 13; saving to Pictures/Anima needs storage access up to Android 9
+        val ask = buildList {
+            if (android.os.Build.VERSION.SDK_INT >= 33) add(android.Manifest.permission.POST_NOTIFICATIONS)
+            if (android.os.Build.VERSION.SDK_INT < 29) {   // both: Android 9 opens shared storage only with read granted too
+                add(android.Manifest.permission.READ_EXTERNAL_STORAGE); add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }.filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (ask.isNotEmpty()) requestPermissions(ask.toTypedArray(), 1)
         // jobs left waiting (or interrupted) when the app was last closed
         if (!selfTest && Queue.store.waitingCount() > 0) QueueService.kick(this)
         // test builds: `am start ... --es chat "<message>" [--ez think true] [--es conv <id>] [--es image <file in
@@ -675,7 +692,7 @@ fun Create(
         }
         if (!big) Text(MEMORY_MODES[s.memoryMode].second, style = MaterialTheme.typography.bodySmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Model: $modelLabel", style = MaterialTheme.typography.bodySmall)
+            Text("Model: $modelLabel", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             TextButton(onClick = onChangeModel, enabled = !s.busy) { Text("Change") }
         }
         val myTask = Installer.task(ModelStore.byId(s.model).active(ctx).id)?.takeIf { it.running }
@@ -683,7 +700,7 @@ fun Create(
             Text("Updating the model: ${myTask.status}", style = MaterialTheme.typography.bodySmall)
             LinearProgressIndicator(progress = { myTask.fraction }, modifier = Modifier.fillMaxWidth())
         } else if (updateBytes > 0) Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Model update available (%.1f GB)".format(updateBytes / 1e9), style = MaterialTheme.typography.bodySmall)
+            Text("Model update available (%.1f GB)".format(updateBytes / 1e9), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             TextButton(onClick = onUpdate, enabled = !s.busy) { Text("Update") }
         }
         // one tap, one job: the button turns into a spinner until the job is in the queue, so a second tap

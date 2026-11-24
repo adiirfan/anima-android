@@ -63,6 +63,17 @@ object Engine {
     external fun kleinTimes(): DoubleArray
     external fun kleinSetMemoryMode(mode: Int)
 
+    // ---- Krea 2 Turbo (its own model folder, models/krea), 768x768, 8 fixed steps ----
+
+    /** Opens the Krea files (word table, step table); returns an error message or null. */
+    external fun kreaInit(modelDir: String, libDir: String): String?
+
+    /** 768x768 ARGB pixels, or null (then see [lastError]). [ids]: the whole Krea template ([KreaTokens]). */
+    external fun kreaGenerate(ids: IntArray, seed: Long, width: Int, height: Int, progress: Progress): IntArray?
+
+    /** [waiting for block files ms, prompt ms, drawing ms, decode ms] of the last Krea picture. */
+    external fun kreaTimes(): DoubleArray
+
     // ---- Qwen-Image 2.1 turbo (its own model folder, models/qwen), 768x768 ----
 
     /** Opens the Qwen-Image files (word table); returns an error message or null. */

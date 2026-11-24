@@ -15,6 +15,7 @@ object Drawer {
     suspend fun draw(ctx: Context, j: Job, progress: (Int, Int) -> Unit): Result = withContext(Dispatchers.Default) {
         val err = when (j.model) {
             "klein" -> if (GpuEngine.useForKlein(ctx)) null else Engines.ensureKlein()
+            "krea" -> if (GpuEngine.useForKrea(ctx)) null else Engines.ensureKrea()
             "qwen" -> if (GpuEngine.useForQwen(ctx)) null else Engines.ensureQwen(j.qwenDrawing)
             "fibo" -> if (GpuEngine.useForFibo(ctx)) null else Engines.ensureFibo()
             "moss" -> if (GpuEngine.useForMoss(ctx)) null else Engines.ensureMoss()
@@ -86,6 +87,14 @@ object Drawer {
                 KleinTokens.init(GpuEngine.kleinDir(ctx))   // the graphics download carries its own word list
                 GpuEngine.kleinGenerate(ctx, KleinTokens.encode(j.prompt), j.seed, 8, w, h, src?.let { guidePixels(it, w, h) }, p)
             } else Engine.kleinGenerate(KleinTokens.encode(j.prompt), j.seed, if (Chip.kind == Chip.Kind.ELITE_GEN5) 8 else 4, w, h, src?.let { guidePixels(it, w, h) }, p)
+            "krea" -> {
+                if (src != null) error("Krea only draws from text: clear the picture to edit")
+                if (GpuEngine.useForKrea(ctx)) {
+                    Engines.release()   // whatever the AI chip still holds: the graphics chip needs the memory
+                    KreaTokens.init(GpuEngine.kreaDir(ctx))   // the graphics download carries its own word list
+                    GpuEngine.kreaGenerate(ctx, KreaTokens.encode(j.prompt), j.seed, w, h, p)
+                } else Engine.kreaGenerate(KreaTokens.encode(j.prompt), j.seed, w, h, p)
+            }
             else -> if (GpuEngine.useForAnima(ctx)) {
                 if (src != null) error("Guide pictures need Anima on the AI chip")
                 Engines.release()   // whatever the AI chip still holds: the graphics chip needs the memory
@@ -102,7 +111,7 @@ object Drawer {
         // Settings: "Upscale every new picture" (skipped without Anima, which holds the upscaler)
         if (Upscaler.auto(ctx) && Upscaler.available(ctx)) bmp = Upscaler.upscale(ctx, bmp)
         val ms = System.currentTimeMillis() - t0
-        val entry = Gallery.save(ctx, bmp, j.prompt, j.seed, when (j.model) { "anima" -> j.steps; "qwen", "moss" -> 8; else -> 4 }, ms)
+        val entry = Gallery.save(ctx, bmp, j.prompt, j.seed, when (j.model) { "anima" -> j.steps; "qwen", "moss", "krea" -> 8; else -> 4 }, ms)
         Result(bmp, entry, ms)
     }
 }

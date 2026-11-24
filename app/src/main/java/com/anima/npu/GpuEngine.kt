@@ -54,23 +54,72 @@ object GpuEngine {
     private fun streamBelow(ctx: Context, gb: Int): Map<String, String> =
         if (lowMemory(ctx, gb)) mapOf("STREAM" to "1") else emptyMap()
 
-    /** This phone has less than [gb] GB of memory in all. */
+    // ---- which graphics engine: OpenCL (libugpu.so, every model) or Vulkan (libvkugpu.so, the models it knows) ----
+    /** 0 automatic, 1 OpenCL, 2 Vulkan (Settings > Graphics engine). */
+    fun engineChoice(ctx: Context): Int = ctx.getSharedPreferences("anima", Context.MODE_PRIVATE).getInt("graphicsEngine", 0)
+    fun setEngineChoice(ctx: Context, v: Int) = ctx.getSharedPreferences("anima", Context.MODE_PRIVATE).edit().putInt("graphicsEngine", v).apply()
+    private const val VKLIB = "libvkugpu.so"
+    /** The models the Vulkan engine can draw, for the Settings text. */
+    const val VULKAN_MODELS = "Anima, Klein, Krea, Qwen-Image, Fibo, MOSS and Wan"
+    /**
+     * Vulkan draws when picked, or automatically on the chip it was checked on: the Snapdragon 8 Elite Gen 5's
+     * graphics chip has a block for 8-bit matrix maths that only Vulkan reaches (about 1.5x faster per step with a
+     * model file in 256-input scale blocks; with the older 64-input files it is no faster, and the engine declines).
+     * It reads the big models (Qwen, Fibo, Wan, MOSS, Klein, Krea) from storage block by block, so they pass 0; Anima stays
+     * whole in memory, so automatic leaves phones under [minGb] on OpenCL for it.
+     */
+    private fun vulkanAllowed(ctx: Context, minGb: Int): Boolean {
+        if (!File(ctx.applicationInfo.nativeLibraryDir, VKLIB).isFile) return false
+        return when (engineChoice(ctx)) {
+            1 -> false
+            2 -> true
+            else -> Chip.kind == Chip.Kind.ELITE_GEN5 && !lowMemory(ctx, minGb)
+        }
+    }
+
+    /**
+     * One drawing run: Vulkan when allowed ([env] only), else, or when it declines (automatic: exit 3) or fails, OpenCL
+     * with [env] + [clEnv]. [restart] is called before an OpenCL run that follows a Vulkan attempt.
+     */
+    private fun draw(ctx: Context, args: List<String>, env: Map<String, String>, clEnv: Map<String, String>, minGb: Int,
+                     restart: () -> Unit, line: (String) -> Unit) {
+        if (vulkanAllowed(ctx, minGb)) {
+            val auto = if (engineChoice(ctx) == 0) mapOf("VKAUTO" to "1") else emptyMap()
+            try {
+                runProgram(ctx, VKLIB, args, env + auto, line)
+                return
+            } catch (e: Exception) {   // skipped, or a driver that refuses or loses the chip mid-picture: OpenCL draws it
+                Log.w(TAG, "Vulkan engine not used, drawing with OpenCL: ${e.message}")
+                restart()
+            }
+        }
+        run(ctx, args, env + clEnv, line)
+    }
+
     fun lowMemory(ctx: Context, gb: Int): Boolean {
         val mi = android.app.ActivityManager.MemoryInfo()
         (ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mi)
         return mi.totalMem < gb * 1024L * 1024 * 1024
     }
 
+    /** Deletes a finished job's work folder, unless files/keep-work exists (debug: create it with run-as to keep the
+     *  engine's inputs for testing by hand; the next job of the same model still replaces it). */
+    private fun cleanUp(ctx: Context, work: File) {
+        if (!File(ctx.filesDir, "keep-work").exists()) work.deleteRecursively()
+    }
+
     /** Runs the engine once; [line] sees every line it prints. Throws with its last lines when it fails. */
     private fun run(ctx: Context, args: List<String>, env: Map<String, String>, line: (String) -> Unit = {}) =
-        runProgram(ctx, LIB, args, env, line)
+        // the engine's third argument is how many extra timed repeats to run after the real one (default 1, for
+        // benchmarks): the app never wants them, and for the decoders and encoders a repeat doubled their time
+        runProgram(ctx, LIB, if (args.size == 2) args + "0" else args, env, line)
 
     /** Runs [lib] (a program in the app's library folder) once, in the engine's folder. */
-    private fun runProgram(ctx: Context, lib: String, args: List<String>, env: Map<String, String>, line: (String) -> Unit = {}) {
+    internal fun runProgram(ctx: Context, lib: String, args: List<String>, env: Map<String, String>, line: (String) -> Unit = {}) {
         val home = home(ctx)
         val libs = ctx.applicationInfo.nativeLibraryDir
         val pb = ProcessBuilder(listOf(File(libs, lib).absolutePath) + args).directory(home).redirectErrorStream(true)
-        pb.environment()["LD_LIBRARY_PATH"] = "$libs:/system/lib64:/vendor/lib64:/system/vendor/lib64"
+        NativeLibs.apply(ctx, pb.environment())
         pb.environment()["KCACHE"] = File(home, "kcache").absolutePath   // built chip programs kept between runs
         // the prompt readers on phones with less than 14 GB: no private copy of the reader's weights (4 to 5 GB for
         // the big readers), they are used straight from the file instead; slower on a long prompt
@@ -98,7 +147,7 @@ object GpuEngine {
         f.writeBytes(b.array())
     }
 
-    private fun readF32(f: File): FloatArray {
+    internal fun readF32(f: File): FloatArray {
         val b = ByteBuffer.wrap(f.readBytes()).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
         return FloatArray(b.remaining()).also { b.get(it) }
     }
@@ -121,12 +170,12 @@ object GpuEngine {
         progress.onStep(0, total)
         val home = home(ctx)
         val step = Regex("^draw step (\\d+):")
-        run(ctx, listOf(File(wdir, "moss_q8.gguf").absolutePath, work.absolutePath),
-            mapOf("DRAW" to "1", "STREAM" to "1", "TUNEFILE" to File(home, "moss.tune").absolutePath)) { l ->
+        draw(ctx, listOf(File(wdir, "moss_q8.gguf").absolutePath, work.absolutePath), mapOf("DRAW" to "1"),
+            mapOf("STREAM" to "1", "TUNEFILE" to File(home, "moss.tune").absolutePath), 0, { progress.onStep(0, total) }) { l ->
             step.find(l)?.let { progress.onStep(it.groupValues[1].toInt() + 1, total) }
         }
         val out = decodeFlux2(ctx, File(work, "draw.f32"), h, w, wdir)
-        work.deleteRecursively()
+        cleanUp(ctx, work)
         return out
     }
 
@@ -211,12 +260,14 @@ object GpuEngine {
         writeF32(File(work, "noise.f32"), FloatArray(h * w * C) { rnd.nextGaussian().toFloat() })
         writeF32(File(work, "sigmas.f32"), sigmas.toFloatArray())
         val step = Regex("^draw step (\\d+):")
-        run(ctx, listOf(File(wdir, "fibo_q8.gguf").absolutePath, work.absolutePath),
-            mapOf("DRAW" to "1", "STREAM" to "1", "TUNEFILE" to File(home, "fibo.tune").absolutePath)) { l ->
+        draw(ctx, listOf(File(wdir, "fibo_q8.gguf").absolutePath, work.absolutePath), mapOf("DRAW" to "1"),
+            // both engines read the blocks from storage as they go (Vulkan: about 1 GB in all instead of 5.4), so every
+            // phone may try Vulkan
+            mapOf("STREAM" to "1", "TUNEFILE" to File(home, "fibo.tune").absolutePath), 0, { progress.onStep(0, total) }) { l ->
             step.find(l)?.let { progress.onStep(it.groupValues[1].toInt() + 1, total) }
         }
         val out = decodeFlux2(ctx, File(work, "draw.f32"), h, w, wdir)
-        work.deleteRecursively()
+        cleanUp(ctx, work)
         return out
     }
 
@@ -261,11 +312,11 @@ object GpuEngine {
         writeF32(File(work, "patches.f32"), x)
         writeF32(File(work, "sigmas.f32"), animaSigmas(steps))
         val step = Regex("^draw step (\\d+):")
-        run(ctx, listOf(File(wdir, "anima_q8.gguf").absolutePath, work.absolutePath, "0", "${width}x$height"),
-            mapOf("DRAW" to "$steps", "CEN" to File(wdir, "anima_q8.cen").absolutePath,
-                "TUNEFILE" to File(home, "anima.tune").absolutePath) + streamBelow(ctx, 10)) { l ->
-            step.find(l)?.let { progress.onStep(it.groupValues[1].toInt() + 1, steps) }
-        }
+        val args = listOf(File(wdir, "anima_q8.gguf").absolutePath, work.absolutePath, "0", "${width}x$height")
+        val onLine: (String) -> Unit = { l -> step.find(l)?.let { progress.onStep(it.groupValues[1].toInt() + 1, steps) } }
+        // chips without fast 8-bit maths (Android 9 era) get each layer turned into 16-bit as it runs: the engine decides
+        draw(ctx, args, mapOf("DRAW" to "$steps", "CEN" to File(wdir, "anima_q8.cen").absolutePath),
+            mapOf("TUNEFILE" to File(home, "anima.tune").absolutePath) + streamBelow(ctx, 10), 10, { progress.onStep(0, steps) }, onLine)
         // patches -> (2hp, 2wp, 16), channels innermost, for the small decoder
         val z = readF32(File(work, "draw.f32"))
         if (z.size != hp * wp * 68) error("graphics-chip engine gave ${z.size} numbers, not ${hp * wp * 68}")
@@ -279,7 +330,7 @@ object GpuEngine {
             mapOf("TUNEFILE" to File(home, "tae_w21.tune").absolutePath))
         val rgb = readF32(File(dec, "gpu_rgb.f32"))
         if (rgb.size != width * height * 3) error("picture decoder gave ${rgb.size} numbers, not ${width * height * 3}")
-        work.deleteRecursively()
+        cleanUp(ctx, work)
         fun px(v: Float) = (v.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
         return IntArray(width * height) { k -> (0xFF shl 24) or (px(rgb[3 * k]) shl 16) or (px(rgb[3 * k + 1]) shl 8) or px(rgb[3 * k + 2]) }
     }
@@ -368,12 +419,12 @@ object GpuEngine {
         File(work, "info.txt").writeText("$Ni $Lt $Lp $width $height\n")
         // 4. the drawing, then the small decoder
         val step = Regex("^draw step (\\d+):")
-        run(ctx, listOf(File(wdir, "klein_q8.gguf").absolutePath, work.absolutePath),
-            mapOf("DRAW" to "1", "TUNEFILE" to File(home, "klein.tune").absolutePath) + streamBelow(ctx, 14)) { l ->
+        draw(ctx, listOf(File(wdir, "klein_q8.gguf").absolutePath, work.absolutePath), mapOf("DRAW" to "1"),
+            mapOf("TUNEFILE" to File(home, "klein.tune").absolutePath) + streamBelow(ctx, 14), 0, { progress.onStep(0, steps) }) { l ->
             step.find(l)?.let { progress.onStep(it.groupValues[1].toInt() + 1, steps) }
         }
         val out = decodeFlux2(ctx, File(work, "draw.f32"), h, w, wdir)
-        work.deleteRecursively()
+        cleanUp(ctx, work)
         return out
     }
 
@@ -391,6 +442,67 @@ object GpuEngine {
     }
 
     // ---- Qwen-Image 2.1 Turbo ----
+    // ---- Krea 2 Turbo (krea_q4.gguf: 4-bit drawing tables in the Vulkan layout (two-level scales), 8-bit maths, model "krea" in the engine; reader = Qwen3-VL-4B through texttaps "krea") ----
+    private const val KREA_FILES = "krea_q4.gguf tae_w21.gguf krea_reader.gguf qwen_tokenizer.json"
+    private const val KREA_DROP = 34   // template rows before the prompt: the system turn and "<|im_start|>user\n"
+    private val KREA_SIGMAS = floatArrayOf(1.0f, 0.9499281f, 0.8877230f, 0.8083667f, 0.7036315f, 0.5590252f, 0.3464282f, 0.0031514f, 0f)
+
+    fun kreaDir(ctx: Context): File = ModelStore.KREA.gpu!!.modelDir(ctx)
+
+    fun kreaReady(ctx: Context) = program(ctx).isFile && File(ctx.applicationInfo.nativeLibraryDir, "libtexttaps.so").isFile &&
+        KREA_FILES.split(" ").all { File(kreaDir(ctx), it).isFile }
+
+    /** Krea on the graphics chip: picked on the models page, or the phone has no AI-chip build of it. */
+    fun useForKrea(ctx: Context) = ModelStore.KREA.runsOnGpu(ctx) && kreaReady(ctx)
+
+    /**
+     * Krea 2 Turbo: the reader's 12 tapped layers (processor), then the engine runs Krea's prompt fusion and the
+     * 8 fixed steps (4-bit blocks streamed from storage: 7.8 GB), then the small Wan 2.1 decoder.
+     */
+    fun kreaGenerate(ctx: Context, ids: IntArray, seed: Long, width: Int, height: Int, progress: Progress): IntArray {
+        val lh = height / 8; val lw = width / 8; val Ni = (lh / 2) * (lw / 2)
+        val steps = KREA_SIGMAS.size - 1
+        val wdir = kreaDir(ctx)
+        progress.onStep(0, steps)
+        val Lt = ids.size - KREA_DROP
+        if (Lt < 1 || ids.size > 512) error("prompt is not in Krea's template, or too long")
+        val Lp = (Ni + Lt + 7) / 8 * 8 - Ni - Lt
+        val work = File(ctx.cacheDir, "ugpu_krea").apply { deleteRecursively(); mkdirs() }
+        val home = home(ctx)
+        // 1. the reader: ctx.f32 = the kept rows x 12 tapped layers
+        val ib = ByteBuffer.allocate(ids.size * 4).order(ByteOrder.LITTLE_ENDIAN)
+        ib.asIntBuffer().put(ids)
+        File(work, "ids.i32").writeBytes(ib.array())
+        val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 8).toString()
+        runProgram(ctx, "libtexttaps.so", listOf(File(wdir, "krea_reader.gguf").absolutePath,
+            File(work, "ids.i32").absolutePath, work.absolutePath, threads, "krea", KREA_DROP.toString()), emptyMap())
+        if (File(work, "ctx.f32").length() != Lt * 12L * 2560 * 4) error("prompt reader gave the wrong number of rows")
+        // 2. noise (16 x h x w, the model's latent space) and the fixed schedule
+        val rnd = java.util.Random(seed)
+        writeF32(File(work, "noise.f32"), FloatArray(16 * lh * lw) { rnd.nextGaussian().toFloat() })
+        writeF32(File(work, "sigmas.f32"), KREA_SIGMAS)
+        File(work, "engine.txt").writeText("$Ni $Lt $Lp $width $height\n")
+        // 3. the drawing, then the decoder (draw.f32 is (h, w, 16), as the decoder reads it)
+        val step = Regex("^draw step (\\d+):")
+        // Vulkan reads the blocks from storage as it goes, OpenCL with STREAM=1: neither needs a big phone
+        draw(ctx, listOf(File(wdir, "krea_q4.gguf").absolutePath, work.absolutePath), mapOf("DRAW" to "1"),
+            mapOf("STREAM" to "1", "TUNEFILE" to File(home, "krea.tune").absolutePath), 0, { progress.onStep(0, steps) }) { l ->
+            step.find(l)?.let { progress.onStep(it.groupValues[1].toInt() + 1, steps) }
+        }
+        val dec = File(work, "dec").apply { mkdirs() }
+        if (!File(work, "draw.f32").renameTo(File(dec, "lat.f32"))) error("graphics-chip engine gave no picture")
+        File(dec, "info.txt").writeText("$lh $lw\n")
+        run(ctx, listOf(File(wdir, "tae_w21.gguf").absolutePath, dec.absolutePath),
+            mapOf("TUNEFILE" to File(home, "tae_w21.tune").absolutePath))
+        val rgb = readF32(File(dec, "gpu_rgb.f32"))
+        if (rgb.size != width * height * 3) error("picture decoder gave ${rgb.size} numbers, not ${width * height * 3}")
+        cleanUp(ctx, work)
+        fun px(v: Float) = (v.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+        return IntArray(width * height) { k ->
+            (0xFF shl 24) or (px(rgb[3 * k]) shl 16) or (px(rgb[3 * k + 1]) shl 8) or px(rgb[3 * k + 2])
+        }
+    }
+
     private const val QWEN_FILES = "qwen_q4.gguf tae_qwen.gguf qimg_reader.gguf qwen_tokenizer.json"
     /** Turbo's 8 fixed noise levels (no shift), as the AI-chip route's sigmas.txt; the engine adds the final 0. */
     private val QWEN_SIGMAS = floatArrayOf(1.0f, 0.978453f, 0.95418f, 0.926626f, 0.89508f, 0.845148f, 0.704534f, 0.414568f)
@@ -441,8 +553,8 @@ object GpuEngine {
         File(work, "info.txt").writeText("$nc $width $height\n")
         // 3. the drawing (blocks streamed from storage: the whole model would not fit next to the app), then the decoder
         val step = Regex("^draw step (\\d+):")
-        run(ctx, listOf(File(wdir, "qwen_q4.gguf").absolutePath, work.absolutePath),
-            mapOf("DRAW" to "1", "STREAM" to "1", "TUNEFILE" to File(home, "qwen.tune").absolutePath)) { l ->
+        draw(ctx, listOf(File(wdir, "qwen_q4.gguf").absolutePath, work.absolutePath), mapOf("DRAW" to "1"),
+            mapOf("STREAM" to "1", "TUNEFILE" to File(home, "qwen.tune").absolutePath), 0, { progress.onStep(0, steps) }) { l ->
             step.find(l)?.let { progress.onStep(it.groupValues[1].toInt() + 1, steps) }
         }
         val z = readF32(File(work, "draw.f32"))
@@ -454,7 +566,7 @@ object GpuEngine {
             mapOf("TUNEFILE" to File(home, "tae_qwen.tune").absolutePath))
         val rgb = readF32(File(dec, "gpu_rgb.f32"))
         if (rgb.size != width * height * 3) error("picture decoder gave ${rgb.size} numbers, not ${width * height * 3}")
-        work.deleteRecursively()
+        cleanUp(ctx, work)
         fun px(v: Float) = (v.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
         return IntArray(width * height) { k ->
             (0xFF shl 24) or (px(rgb[3 * k]) shl 16) or (px(rgb[3 * k + 1]) shl 8) or px(rgb[3 * k + 2])
@@ -477,9 +589,12 @@ object GpuEngine {
     /** Wan on the graphics chip: picked on the models page, or the phone has no AI-chip build of it. */
     fun useForWan(ctx: Context) = ModelStore.WAN.runsOnGpu(ctx) && wanReady(ctx)
 
-    /** Frames per clip: frames.txt in the graphics folder (4n + 1), else 17 (about 1 s at 16 per second). */
+    /**
+     * Frames per clip: frames.txt in the graphics folder (4n + 1), else 49 (3 s at 16 per second), the same clip as the
+     * AI chip's 3-second set (the graphics download has no frames.txt).
+     */
     fun wanFrames(ctx: Context): Int =
-        File(wanDir(ctx), "frames.txt").takeIf { it.isFile }?.readText()?.trim()?.toIntOrNull()?.takeIf { it >= 5 && (it - 1) % 4 == 0 } ?: 17
+        File(wanDir(ctx), "frames.txt").takeIf { it.isFile }?.readText()?.trim()?.toIntOrNull()?.takeIf { it >= 5 && (it - 1) % 4 == 0 } ?: 49
 
     /**
      * A clip from the start picture [start] (768 x 768 ARGB) and the prompt's reader rows [rows] (n x 4096, WanReader).
@@ -544,9 +659,9 @@ object GpuEngine {
         File(work, "info.txt").writeText("$L $WAN_PROMPT_ROWS $T $Hp $Wp $W $H $FR\n")
         // 4. the drawing (blocks streamed from storage), then every frame through the small decoder
         val step = Regex("^draw step (\\d+):")
-        run(ctx, listOf(File(wdir, "wan_q8.gguf").absolutePath, work.absolutePath),
-            mapOf("DRAW" to "1", "STREAM" to "1", "SEED" to (seed and 0x7fffffff).toString(),
-                "TUNEFILE" to File(home, "wan.tune").absolutePath)) { l ->
+        draw(ctx, listOf(File(wdir, "wan_q8.gguf").absolutePath, work.absolutePath),
+            mapOf("DRAW" to "1", "SEED" to (seed and 0x7fffffff).toString()),
+            mapOf("STREAM" to "1", "TUNEFILE" to File(home, "wan.tune").absolutePath), 0, { progress.onStep(0, steps) }) { l ->
             step.find(l)?.let { progress.onStep(it.groupValues[1].toInt() + 1, steps) }
         }
         val z = readF32(File(work, "draw.f32"))
@@ -559,12 +674,24 @@ object GpuEngine {
         writeF32(File(dec, "lat.f32"), lat)
         File(dec, "info.txt").writeText("$hl $wl $T\n")
         run(ctx, listOf(File(wdir, "tae_w22.gguf").absolutePath, dec.absolutePath), mapOf("TUNEFILE" to File(home, "tae_w22.tune").absolutePath))
-        val rgb = readF32(File(dec, "gpu_rgb.f32"))
+        // one frame at a time: the whole 49-frame clip as floats is 347 MB, more than the app's memory allowance
         val NP = W * H
-        if (rgb.size != FR * NP * 3) error("clip decoder gave ${rgb.size} numbers, not ${FR * NP * 3}")
-        work.deleteRecursively()
+        val out = File(dec, "gpu_rgb.f32")
+        if (out.length() != FR.toLong() * NP * 3 * 4) error("clip decoder gave ${out.length() / 4} numbers, not ${FR.toLong() * NP * 3}")
         fun px(v: Float) = (v.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
-        return List(FR) { f -> IntArray(NP) { k -> val o = (f * NP + k) * 3
-            (0xFF shl 24) or (px(rgb[o]) shl 16) or (px(rgb[o + 1]) shl 8) or px(rgb[o + 2]) } }
+        val frames = ArrayList<IntArray>(FR)
+        java.io.RandomAccessFile(out, "r").use { raf ->
+            val buf = ByteBuffer.allocate(NP * 3 * 4).order(ByteOrder.LITTLE_ENDIAN)
+            val fl = buf.asFloatBuffer()
+            for (f in 0 until FR) {
+                buf.clear()
+                val at = f.toLong() * NP * 3 * 4
+                while (buf.hasRemaining()) if (raf.channel.read(buf, at + buf.position()) < 0) error("clip decoder output ended early")
+                frames.add(IntArray(NP) { k -> val o = k * 3
+                    (0xFF shl 24) or (px(fl.get(o)) shl 16) or (px(fl.get(o + 1)) shl 8) or px(fl.get(o + 2)) })
+            }
+        }
+        cleanUp(ctx, work)
+        return frames
     }
 }
