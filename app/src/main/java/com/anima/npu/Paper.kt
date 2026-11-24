@@ -33,6 +33,9 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.geometry.CornerRadius
@@ -201,8 +204,15 @@ fun QueueChip(waiting: Int, modifier: Modifier = Modifier, onClick: () -> Unit) 
             Text("Queue", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             if (waiting > 0) Box(Modifier.defaultMinSize(minWidth = 20.dp).height(20.dp).clip(CircleShape).background(p.badge)
                 .padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
-                Text("$waiting", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("$waiting", style = BadgeNumber, color = Color.White)
             }
         }
     }
 }
+
+/** A number inside a small round badge: the font's extra space above and below is trimmed so it sits in the middle. */
+val BadgeNumber = TextStyle(
+    fontFamily = PaperFont, fontSize = 12.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold,
+    platformStyle = PlatformTextStyle(includeFontPadding = false),
+    lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
+)

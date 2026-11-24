@@ -911,12 +911,11 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit, selected:
     var asking by remember { mutableStateOf(false) }
     var clips by remember { mutableStateOf<Set<String>>(emptySet()) }   // which pictures are GIFs or videos
     LaunchedEffect(refresh) {
-        withContext(Dispatchers.IO) {
-            val all = Gallery.list(ctx)
-            clips = all.filter { Gallery.isClip(ctx, it) }.map { it.uri.toString() }.toSet()
-            items = all
-        }
+        // the pictures show at once; which are clips is asked of the phone one by one afterwards (slow on big galleries)
+        val all = withContext(Dispatchers.IO) { Gallery.list(ctx) }
+        items = all
         loaded = true
+        clips = withContext(Dispatchers.IO) { all.filter { Gallery.isClip(ctx, it) }.map { it.uri.toString() }.toSet() }
     }
     val shown = remember(items, clips, galleryFilter) { items.filter { galleryFilter.matches(it.kind, it.uri.toString() in clips) } }
     val groups = remember(shown) { groupByDay(shown, { it.savedAt }, System.currentTimeMillis(), java.time.ZoneId.systemDefault()) }
@@ -1084,4 +1083,4 @@ private fun AppMark() = Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp))
 
 /** How many pictures wait in the queue, as a small blue badge. */
 @Composable
-private fun CountBadge(n: Int) = Badge(containerColor = LocalPaper.current.badge, contentColor = Color.White) { Text("$n") }
+private fun CountBadge(n: Int) = Badge(containerColor = LocalPaper.current.badge, contentColor = Color.White) { Text("$n", style = BadgeNumber.copy(fontSize = 11.sp, lineHeight = 11.sp)) }
