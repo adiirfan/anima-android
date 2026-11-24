@@ -97,6 +97,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -1075,11 +1076,13 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
     }
 }
 
-/** The app's mark in the menu: a small blue square with "A". */
+/** The app's mark in the menu: the app icon picked in Settings, so it matches the home screen. */
 @Composable
-private fun AppMark() = Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(LocalPaper.current.accent),
-    contentAlignment = Alignment.Center) {
-    Text("A", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+private fun AppMark() {
+    val ctx = LocalContext.current
+    val launcher = remember { AppIcon.current(ctx) }
+    Image(painterResource(AppIcon.picture(AppIcon.picked ?: launcher)), "Anima",
+        Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
 }
 
 /** How many pictures wait in the queue, as a small blue badge. */

@@ -1,5 +1,7 @@
 package com.anima.npu
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -27,6 +29,12 @@ object AppIcon {
         Triple("IconBlonde", "Blonde", R.drawable.icon_blonde),
     )
 
+    /** The icon picked in this run of the app, so the app's own mark follows a change at once (null: not changed yet). */
+    var picked by androidx.compose.runtime.mutableStateOf<String?>(null)
+
+    /** The picture of [alias]. */
+    fun picture(alias: String): Int = (ALL.firstOrNull { it.first == alias } ?: ALL.first()).third
+
     private fun component(ctx: Context, alias: String) = ComponentName(ctx.packageName, "com.anima.npu.$alias")
 
     /** The launcher entry switched on now. */
@@ -43,6 +51,7 @@ object AppIcon {
      * no icon. Some launchers take a few seconds to show it, and drop a home-screen copy of the old icon.
      */
     fun set(ctx: Context, alias: String) {
+        picked = alias
         val pm = ctx.packageManager
         pm.setComponentEnabledSetting(component(ctx, alias), PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
         for ((a, _, _) in ALL) if (a != alias) pm.setComponentEnabledSetting(component(ctx, a),
