@@ -3,8 +3,16 @@
 An Android app that draws pictures and short clips, and chats, entirely on the phone. The models run on the phone's
 neural unit (Qualcomm QNN / HTP) or its graphics chip; the internet is only used to download models and app updates.
 
-It runs on phones with the **Snapdragon 8 Elite** (HTP v79) or the **Snapdragon 8 Elite Gen 5** (HTP v81). Other
-phones get a "Device not supported" page.
+It works best on phones with the **Snapdragon 8 Elite** (HTP v79) or the **Snapdragon 8 Elite Gen 5** (HTP v81),
+where every model can run on the neural unit. Other phones work too, more slowly:
+
+- **Snapdragon 8 Gen 3 and 8 Gen 2:** Anima runs on the neural unit; the other picture models run on the graphics
+  chip.
+- **Any other phone with Android 9 or newer (64-bit Arm):** the picture models run on the graphics chip. It has been
+  tried on a Sony Xperia XZ3 (Snapdragon 845).
+- On all of these, the chat uses the smaller Qwen3.5 0.8B on the phone's processor.
+
+The larger models need a lot of memory and are much slower on older phones.
 
 ## What it can do
 
@@ -23,7 +31,8 @@ phones get a "Device not supported" page.
 - **Queue.** Pictures wait in a queue that keeps drawing in the background, with a progress notification and a
   "Picture ready" notification for each one.
 - **Chat.** The Chat tab talks to [Ling-3.0-tiny](https://huggingface.co/inclusionAI/Ling-3.0-tiny) (or the
-  smaller Qwen3.5 0.8B) on the same phone, through llama.cpp's Hexagon backend. Ask it for a picture and it picks
+  smaller Qwen3.5 0.8B) on the same phone, through llama.cpp's Hexagon backend. Phones without an 8 Elite chip chat
+  with Qwen3.5 0.8B on the processor. Ask it for a picture and it picks
   Anima or Qwen-Image, writes the prompt, adds it to the queue, and shows the picture in the conversation.
 - **Updates.** The app updates itself from this repo's releases.
 
