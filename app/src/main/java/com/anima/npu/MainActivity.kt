@@ -604,19 +604,12 @@ fun Create(
     val controls: @Composable ColumnScope.() -> Unit = controls@{
         // One list of drawing models (2026-11-06: five models and Noct Q no longer fit as buttons in a row).
         // Noct Q is Qwen with other drawing files, copied over the cable into qwen/noctq/: listed when present.
-        val choices = remember(installed) {
-            listOfNotNull(
-                Triple("anima", null, "Anima"), Triple("klein", null, "FLUX.2 klein"), Triple("krea", null, "Krea 2 Turbo"), Triple("qwen", "qwen", "Qwen-Image 2.1"),
-                Triple("qwen", "noctq", "Noct Q").takeIf { File(ModelStore.QWEN.modelDir(ctx), "$NOCTQ_DIR/sp31.bin").isFile },
-                Triple("fibo", null, "Fibo 2.0 (edits)"), Triple("moss", null, "MOSS-Image"),
-                Triple("wan", null, "Wan 2.2 (moving picture)"),
-            )   // every model is listed; one with nothing for this phone is shown as unavailable
-        }
+        val choices = remember(installed) { createChoices(File(ModelStore.QWEN.modelDir(ctx), "$NOCTQ_DIR/sp31.bin").isFile) }
         var menu by remember { mutableStateOf(false) }
         val p = LocalPaper.current
         val modelPicker: @Composable () -> Unit = {
             Box {
-                Pill((choices.firstOrNull { it.first == s.model && (it.second == null || it.second == s.qwenDrawing) }?.third ?: s.model) + "  ▾",
+                Pill((choices.firstOrNull { it.id == s.model && (it.drawing == null || it.drawing == s.qwenDrawing) }?.name ?: s.model) + "  ▾",
                     enabled = !s.busy) { menu = true }
                 DropdownMenu(menu, { menu = false }) {
                     choices.forEach { (id, drawing, name) ->
@@ -655,13 +648,13 @@ fun Create(
             }
             return@controls
         }
-        val fiboNeedsPicture = (fibo || wan) && s.edit == null
+        val fiboNeedsPicture = s.model in NEEDS_PICTURE && s.edit == null
 
         // the prompt card: what to draw, with which model, and any picture to edit or follow
         PaperCard(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (wan) "How the picture moves" else if (fibo || !anima && !moss && !krea && !qwenSmall && s.edit != null) "What to change" else "Prompt",
+                    Text(if (wan) "How the picture moves" else if (fibo || s.model !in TEXT_ONLY && !qwenSmall && s.edit != null) "What to change" else "Prompt",
                         fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     modelPicker()
                 }
@@ -670,7 +663,7 @@ fun Create(
                     cursorBrush = androidx.compose.ui.graphics.SolidColor(p.accent))
                 if (qwenSmall) Note("Editing pictures needs the Standard Qwen download (Model: Change).")
                 if (fiboNeedsPicture) Note(if (wan) "Choose the picture to bring to life below." else "Fibo only edits: choose a picture to edit below.")
-                if (!anima && !qwenSmall && !moss && !krea) {   // MOSS and Krea only draw new pictures
+                if (s.model !in TEXT_ONLY && !qwenSmall) {   // Anima, MOSS and Krea only draw new pictures
                     Note(if (wan) "Picture to animate: it becomes the first frame" else if (fibo) "Picture to edit: Fibo changes it as you describe"
                         else "Picture to edit (optional): ${if (klein) "Klein" else "Qwen"} changes it as you describe")
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -768,7 +761,7 @@ fun Create(
     // double tap) cannot add it twice.
     val drawButton: @Composable () -> Unit = {
         val myTask = Installer.task(ModelStore.byId(s.model).active(ctx).id)?.takeIf { it.running }
-        val fiboNeedsPicture = (fibo || wan) && s.edit == null
+        val fiboNeedsPicture = s.model in NEEDS_PICTURE && s.edit == null
         var adding by remember { mutableStateOf(false) }
         val addScope = rememberCoroutineScope()
         BigButton(if (adding) "Adding…" else if (myTask != null) "Draw (after the update)" else "Draw",
