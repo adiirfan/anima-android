@@ -200,6 +200,7 @@ const val WAN_TIME = "17 frames, a looping video"
 const val WAN_LONG_TIME = "49 frames, a 3-second video"
 const val WAN_GPU_TIME = "49 frames, a 3-second video, on the graphics chip"
 const val MOSS_GPU_TIME = "8 steps on the graphics chip"
+const val KREA_TIME = "8 steps"
 const val FIBO_GPU_TIME = "edits only · 4 steps on the graphics chip"
 
 /**
@@ -577,6 +578,7 @@ fun Create(
     val qwen = s.model == "qwen"
     val fibo = s.model == "fibo"
     val moss = s.model == "moss"
+    val krea = s.model == "krea"
     val wan = s.model == "wan"
     val big = s.model in BIG_MODELS   // one 768x768 size, no size or memory choices
     val anima = s.model == "anima"
@@ -604,7 +606,7 @@ fun Create(
         // Noct Q is Qwen with other drawing files, copied over the cable into qwen/noctq/: listed when present.
         val choices = remember(installed) {
             listOfNotNull(
-                Triple("anima", null, "Anima"), Triple("klein", null, "FLUX.2 klein"), Triple("qwen", "qwen", "Qwen-Image 2.1"),
+                Triple("anima", null, "Anima"), Triple("klein", null, "FLUX.2 klein"), Triple("krea", null, "Krea 2 Turbo"), Triple("qwen", "qwen", "Qwen-Image 2.1"),
                 Triple("qwen", "noctq", "Noct Q").takeIf { File(ModelStore.QWEN.modelDir(ctx), "$NOCTQ_DIR/sp31.bin").isFile },
                 Triple("fibo", null, "Fibo 2.0 (edits)"), Triple("moss", null, "MOSS-Image"),
                 Triple("wan", null, "Wan 2.2 (moving picture)"),
@@ -639,6 +641,7 @@ fun Create(
                         fibo -> " It changes your pictures as you describe, at 768×768 (about 15 GB). It only edits."
                         moss -> " It draws 768×768 pictures from plain sentences in 8 steps (about ${if (ModelStore.MOSS.runsOnGpu(ctx)) 11 else 16} GB). It does not edit."
                         wan -> " It turns one of your pictures into a short looping video that moves as you describe."
+                        krea -> " It draws 768×768 pictures from plain sentences in 8 steps. It does not edit."
                         else -> ""
                     })
                     val dl = ModelStore.byId(s.model).active(ctx).id
@@ -658,7 +661,7 @@ fun Create(
         PaperCard(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (wan) "How the picture moves" else if (fibo || !anima && !moss && !qwenSmall && s.edit != null) "What to change" else "Prompt",
+                    Text(if (wan) "How the picture moves" else if (fibo || !anima && !moss && !krea && !qwenSmall && s.edit != null) "What to change" else "Prompt",
                         fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     modelPicker()
                 }
@@ -667,7 +670,7 @@ fun Create(
                     cursorBrush = androidx.compose.ui.graphics.SolidColor(p.accent))
                 if (qwenSmall) Note("Editing pictures needs the Standard Qwen download (Model: Change).")
                 if (fiboNeedsPicture) Note(if (wan) "Choose the picture to bring to life below." else "Fibo only edits: choose a picture to edit below.")
-                if (!anima && !qwenSmall && !moss) {   // MOSS only draws new pictures
+                if (!anima && !qwenSmall && !moss && !krea) {   // MOSS and Krea only draw new pictures
                     Note(if (wan) "Picture to animate: it becomes the first frame" else if (fibo) "Picture to edit: Fibo changes it as you describe"
                         else "Picture to edit (optional): ${if (klein) "Klein" else "Qwen"} changes it as you describe")
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -706,6 +709,7 @@ fun Create(
             fibo -> if (GpuEngine.useForFibo(ctx)) FIBO_GPU_TIME else FIBO_TIME
             moss -> if (GpuEngine.useForMoss(ctx)) MOSS_GPU_TIME else MOSS_TIME
             wan -> wanTime(ctx)
+            krea -> KREA_TIME
             qwen -> if (s.qwenDrawing == "noctq") NOCTQ_TIME else QWEN_TIME; else -> SIZE_TIERS[s.tier].second }
         val myTask = Installer.task(ModelStore.byId(s.model).active(ctx).id)?.takeIf { it.running }
         PaperCard(Modifier.fillMaxWidth(), padding = PaddingValues(horizontal = 16.dp)) {
