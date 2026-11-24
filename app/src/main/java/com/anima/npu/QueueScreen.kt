@@ -71,7 +71,7 @@ internal fun stateText(j: Job, progress: Pair<String, String>): String = when (j
     JobState.CANCELLED -> "Cancelled"
 }
 
-private fun modelName(j: Job) = when (j.model) {
+internal fun modelName(j: Job) = when (j.model) {
     "qwen" -> if (j.qwenDrawing == "noctq") "Noct Q" else "Qwen-Image"
     "fibo" -> "Fibo edit"
     "moss" -> "MOSS"

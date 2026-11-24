@@ -1,5 +1,6 @@
 package com.anima.npu
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.border
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -177,6 +178,11 @@ private fun Conversation(chat: ChatController, convId: String?, conv: Conversati
     Column(Modifier.fillMaxSize().imePadding()) {
         ChatBar(onMenu, conv?.title ?: "New chat", if (mine) status else modelLabel(ctx, slots), buttons = if (wide) 1 else 2) {
             if (onList != null) IconButton(onClick = onList) { Icon(AppIcons.Chats, "Chats") }
+            // a new chat in one tap (it is also in the menu)
+            Surface(onClick = { open(null) }, enabled = !busy, shape = CircleShape, color = LocalPaper.current.soft,
+                contentColor = LocalPaper.current.softText, modifier = Modifier.size(40.dp)) {
+                Box(contentAlignment = Alignment.Center) { Icon(AppIcons.Add, "New chat", Modifier.size(20.dp)) }
+            }
             var menu by remember { mutableStateOf(false) }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(AppIcons.More, "More") }
@@ -332,10 +338,13 @@ private fun SmallIcon(icon: ImageVector, what: String, enabled: Boolean = true,
 
 @Composable
 private fun StatusLine(status: String) {
-    Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val p = LocalPaper.current
+    Row(Modifier.padding(vertical = 6.dp).clip(RoundedCornerShape(18.dp)).background(p.card)
+        .border(1.dp, p.cardLine, RoundedCornerShape(18.dp)).padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = p.muted)
         Spacer(Modifier.width(10.dp))
-        Text(status.ifEmpty { "Working…" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(status.ifEmpty { "Working…" }, fontSize = 13.sp, color = p.muted)
     }
 }
 
@@ -431,18 +440,24 @@ private fun PictureCard(jobId: String, onOpen: (Gallery.Entry) -> Unit) {
     val bmp by produceState<Bitmap?>(null, entry) {
         value = entry?.let { e -> withContext(Dispatchers.IO) { Gallery.thumbnail(ctx, e, 512) } }
     }
-    Box(Modifier.widthIn(max = 280.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp))
-        .background(LocalPaper.current.card).border(1.dp, LocalPaper.current.cardLine, RoundedCornerShape(18.dp))) {
+    val p = LocalPaper.current
+    Box(Modifier.widthIn(max = if (isWide()) 240.dp else 260.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp))
+        .background(p.card).border(1.dp, p.cardLine, RoundedCornerShape(18.dp))) {
         val b = bmp
-        if (b != null && entry != null) {
+        if (b != null && entry != null) Column {
             Image(b.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(b.width.toFloat() / b.height)
                 .clickable { onOpen(entry) }, contentScale = ContentScale.Fit)
+            // the prompt the picture was drawn from, and with what
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(j.prompt, fontSize = 12.sp, lineHeight = 17.sp, color = p.muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Text("${modelName(j)} · ${j.width}×${j.height}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
         } else {
             val what = when (j?.state) {
                 null -> "This picture is no longer in the queue"
                 JobState.WAITING -> "Waiting in the queue…"
                 JobState.DRAWING -> "Drawing" + (if (progress.first == jobId && progress.second.isNotEmpty()) ": ${progress.second}" else "…")
-                JobState.FAILED -> "Failed: ${j.error ?: ""}"
+                JobState.FAILED -> j.error?.trim()?.takeIf { it.isNotEmpty() }?.let { "Failed · $it" } ?: "Failed"
                 JobState.CANCELLED -> "Cancelled"
                 JobState.DONE -> "Loading…"
             }
@@ -477,9 +492,10 @@ private fun ChatList(chat: ChatController, current: String?, onOpen: (String?) -
         if (all.isEmpty()) Text("No chats yet.", Modifier.padding(20.dp), color = scheme.onSurfaceVariant)
         LazyColumn {
             items(all, key = { it.id }) { c ->
-                Row(Modifier.fillMaxWidth().clickable { onOpen(c.id) }
-                    .background(if (c.id == current) scheme.surfaceContainerHigh else scheme.surface)
-                    .padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp).clip(RoundedCornerShape(14.dp))
+                    .background(if (c.id == current) LocalPaper.current.soft else Color.Transparent)
+                    .clickable { onOpen(c.id) }
+                    .padding(start = 12.dp, end = 0.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(c.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 15.sp)
@@ -492,7 +508,6 @@ private fun ChatList(chat: ChatController, current: String?, onOpen: (String?) -
                         Icon(AppIcons.Delete, "Delete", Modifier.size(20.dp), tint = scheme.onSurfaceVariant)
                     }
                 }
-                HorizontalDivider(Modifier.padding(start = 20.dp), color = scheme.outlineVariant.copy(alpha = 0.4f))
             }
         }
     }
