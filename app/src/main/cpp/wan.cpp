@@ -20,6 +20,18 @@ double nowMs() {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
+// Memory the system can still hand out, in MB (MemAvailable; the AI chip's buffers come out of it too).
+static long availMB() {
+    long kb = -1;
+    if (FILE* f = fopen("/proc/meminfo", "r")) {
+        char line[128];
+        while (fgets(line, sizeof line, f))
+            if (sscanf(line, "MemAvailable: %ld kB", &kb) == 1) break;
+        fclose(f);
+    }
+    return kb < 0 ? -1 : kb / 1024;
+}
+
 struct Rpc {
     void* (*alloc)(int, uint32_t, int) = nullptr;
     void (*free)(void*) = nullptr;
@@ -169,6 +181,7 @@ bool Wan::generate(const float* rows, int n, const uint8_t* rgb, uint64_t seed, 
     sig.push_back(0);
     if (n < 1 || n > T) { *err = "prompt too long (more than 512 words)"; return false; }
     if (progress) progress(0, STEPS);
+    look_ = -1;   // free memory differs from clip to clip: measured again on the first step
     const size_t PLANE = (size_t)LH * LH, LAT = (size_t)C * F * PLANE;
     auto zat = [&](int c, int f) { return (size_t)c * F * PLANE + (size_t)f * PLANE; };   // z laid out (C, F, H, W)
 
@@ -275,15 +288,28 @@ bool Wan::generate(const float* rows, int n, const uint8_t* rgb, uint64_t seed, 
             });
         };
         int next = 0;
-        for (; next < std::min(NB, ahead_); next++) start(next);
         bool ok = true;
+        if (look_ < 0) {
+            // A block holds ~2.2 GB while loaded at 49 frames (its working area alone is ~1.6 GB), so three at once
+            // got the app killed on an 11 GB phone (Galaxy Z Fold, 2026-11-24). Load the first one alone, see what
+            // it took, and keep only as many loading ahead as leave room to spare.
+            const long before = availMB();
+            start(next++);
+            loads[0].wait();
+            const long after = availMB(), each = std::max(200L, before - after);
+            const long kSpare = 1500;   // MB left over for the phone itself
+            look_ = (before < 0 || after < 0) ? ahead_ : (int)std::clamp((after - kSpare) / each, 0L, (long)ahead_);
+            LOGI("a block takes %ld MB, %ld MB free after one: %d loading ahead", each, after, look_);
+        }
+        for (; next < std::min(NB, std::max(1, look_)); next++) start(next);
         for (int k = 0; k < NB && ok; k++) {
             double tw = nowMs();
             if (!loads[k].get()) { *err = errs[k]; ok = false; break; }
             r->msLoadWait += nowMs() - tw;
-            if (next < NB) start(next++);
+            if (look_ > 0 && next < NB) start(next++);
             if (!bindAll(*ctxs[k], err) || !ctxs[k]->exec(ctxs[k]->graphs()[0], err)) ok = false;
             ctxs[k].reset();
+            if (look_ == 0 && next < NB) start(next++);   // no room for two: the next loads once this one is gone
         }
         for (int k = 0; k < NB; k++) if (loads[k].valid()) loads[k].wait();
         if (!ok) return false;

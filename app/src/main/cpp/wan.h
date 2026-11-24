@@ -46,7 +46,8 @@ private:
     bool bindAll(QnnCtx& c, std::string* err);
     bool runFile(const std::string& name, std::string* err);
     std::string dir_;
-    int ahead_ = 2;
+    int ahead_ = 2;     // most blocks loading while one runs (WAN_AHEAD); fewer when memory is short
+    int look_ = -1;     // blocks loaded ahead on this phone, measured on the first step (-1: not yet)
     std::map<std::string, Shm> bufs_;
     bool ready_ = false;
 };
