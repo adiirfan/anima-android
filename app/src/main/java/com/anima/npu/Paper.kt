@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -21,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -93,13 +96,14 @@ fun Pill(text: String, selected: Boolean = false, enabled: Boolean = true, modif
 
 /** The page's main action (Draw): full round, accent coloured, 56 dp tall. */
 @Composable
-fun BigButton(text: String, icon: ImageVector? = null, enabled: Boolean = true, modifier: Modifier = Modifier,
-              onClick: () -> Unit) {
+fun BigButton(text: String, icon: ImageVector? = null, enabled: Boolean = true, busy: Boolean = false,
+              modifier: Modifier = Modifier, onClick: () -> Unit) {
     val p = LocalPaper.current
     Button(onClick, modifier.height(56.dp), enabled = enabled, shape = CircleShape,
         colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent,
             disabledContainerColor = p.line, disabledContentColor = p.muted)) {
-        if (icon != null) { Icon(icon, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)) }
+        if (busy) { CircularProgressIndicator(Modifier.size(18.dp), color = p.onAccent, strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)) }
+        else if (icon != null) { Icon(icon, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)) }
         Text(text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
     }
 }
@@ -147,5 +151,17 @@ fun PaperRow(modifier: Modifier = Modifier, divider: Boolean = true, content: @C
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically, content = content)
         if (divider) HorizontalDivider(color = LocalPaper.current.divider)
+    }
+}
+
+/** A choice of one among a few, as a row of pills that wraps when it runs out of room. [enabledAt]: which can be picked. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun PillChoices(options: List<String>, selected: Int, enabled: Boolean = true, modifier: Modifier = Modifier,
+                enabledAt: (Int) -> Boolean = { true }, onSelect: (Int) -> Unit) {
+    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        options.forEachIndexed { i, label ->
+            Pill(label, selected = i == selected, enabled = enabled && enabledAt(i)) { onSelect(i) }
+        }
     }
 }

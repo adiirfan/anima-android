@@ -592,11 +592,8 @@ fun Create(
         }
         var menu by remember { mutableStateOf(false) }
         Box {
-            OutlinedButton(onClick = { menu = true }, enabled = !s.busy, modifier = Modifier.fillMaxWidth()) {
-                Text(choices.firstOrNull { it.first == s.model && (it.second == null || it.second == s.qwenDrawing) }?.third ?: s.model,
-                    Modifier.weight(1f))
-                Text("▾")
-            }
+            Pill((choices.firstOrNull { it.first == s.model && (it.second == null || it.second == s.qwenDrawing) }?.third ?: s.model) + "  ▾",
+                enabled = !s.busy) { menu = true }
             DropdownMenu(menu, { menu = false }) {
                 choices.forEach { (id, drawing, name) ->
                     val st = ModelStore.byId(id)
@@ -617,7 +614,7 @@ fun Create(
             })
             val dl = ModelStore.byId(s.model).active(ctx).id
             val task = Installer.task(dl)
-            Button(onClick = onDownload, enabled = !Installer.isRunning(dl)) { Text("Download…") }
+            BigButton("Download…", enabled = !Installer.isRunning(dl), modifier = Modifier.fillMaxWidth(), onClick = onDownload)
             if (task != null && task.running) {
                 Text("Downloading: ${task.status}", style = MaterialTheme.typography.bodySmall)
                 LinearProgressIndicator(progress = { task.fraction }, modifier = Modifier.fillMaxWidth())
@@ -632,33 +629,18 @@ fun Create(
                 label = { Text("Seed") }, singleLine = true, enabled = !s.busy,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
-            OutlinedButton(onClick = { s.seed = Random.nextLong(0, 1_000_000_000); s.seedLocked = false }, enabled = !s.busy) { Text("🎲") }
+            Pill("New seed", enabled = !s.busy) { s.seed = Random.nextLong(0, 1_000_000_000); s.seedLocked = false }
         }
         if (anima) {
             Text("Steps (fewer is faster, 8 is the full quality)")
-            SingleChoiceSegmentedButtonRow {
-                listOf(4, 6, 8).forEachIndexed { i, n ->
-                    SegmentedButton(selected = s.steps == n, onClick = { s.steps = n }, enabled = !s.busy,
-                        shape = SegmentedButtonDefaults.itemShape(i, 3)) { Text("$n") }
-                }
-            }
+            PillChoices(listOf("4", "6", "8"), listOf(4, 6, 8).indexOf(s.steps), enabled = !s.busy) { s.steps = listOf(4, 6, 8)[it] }
         }
         if (!big) Text("Size")
-        if (anima) SingleChoiceSegmentedButtonRow {
-            SIZE_TIERS.forEachIndexed { i, (name, _) ->
-                SegmentedButton(selected = s.tier == i, onClick = { s.tier = i; onSize() }, enabled = !s.busy,
-                    shape = SegmentedButtonDefaults.itemShape(i, SIZE_TIERS.size)) { Text(name) }
-            }
-        }
+        if (anima) PillChoices(SIZE_TIERS.map { it.first }, s.tier, enabled = !s.busy) { s.tier = it; onSize() }
         // Klein's 8 Elite Gen 5 AI-chip build is square only: the other shapes stay on show, greyed out
         val squareOnly = klein && kleinSquareOnly(ctx)
         val shapeUsed = if (squareOnly) 0 else s.shape
-        if (!big) SingleChoiceSegmentedButtonRow {
-            SHAPES.forEachIndexed { i, name ->
-                SegmentedButton(selected = shapeUsed == i, onClick = { s.shape = i; onSize() }, enabled = !s.busy && (!squareOnly || i == 0),
-                    shape = SegmentedButtonDefaults.itemShape(i, SHAPES.size)) { Text(name, maxLines = 1) }
-            }
-        }
+        if (!big) PillChoices(SHAPES, shapeUsed, enabled = !s.busy, enabledAt = { !squareOnly || it == 0 }) { s.shape = it; onSize() }
         if (squareOnly) Text("Tall and wide are not built for this phone's AI chip yet. The graphics chip draws them.",
             style = MaterialTheme.typography.bodySmall)
         val (pw, ph) = if (big) 768 to 768 else pictureSize(if (klein) kleinTier(ctx) else s.tier, shapeUsed)
@@ -677,8 +659,8 @@ fun Create(
                 else "Picture to edit (optional): ${if (klein) "Klein" else "Qwen"} changes it as you describe")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 s.edit?.let { Image(it.asImageBitmap(), null, Modifier.size(72.dp), contentScale = ContentScale.Crop) }
-                OutlinedButton(onClick = { pickEdit.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                    enabled = !s.busy) { Text(if (s.edit == null) "Choose…" else "Change") }
+                Pill(if (s.edit == null) "Choose…" else "Change", enabled = !s.busy) {
+                    pickEdit.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
                 if (s.edit != null) TextButton(onClick = { s.edit = null }, enabled = !s.busy) { Text("Remove") }
             }
             if (s.edit != null) Text((if (big) "It is cropped to a square." else "It is cropped to the shape above.") +
@@ -688,8 +670,8 @@ fun Create(
         if (anima) Text("Guide picture (optional): the layout and pose follow it, the prompt decides the rest")
         if (anima) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             s.guide?.let { Image(it.asImageBitmap(), null, Modifier.size(72.dp), contentScale = ContentScale.Crop) }
-            OutlinedButton(onClick = { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                enabled = !s.busy) { Text(if (s.guide == null) "Choose…" else "Change") }
+            Pill(if (s.guide == null) "Choose…" else "Change", enabled = !s.busy) {
+                pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
             if (s.guide != null) TextButton(onClick = { s.guide = null }, enabled = !s.busy) { Text("Remove") }
         }
         if (anima && s.guide != null) {
@@ -701,12 +683,7 @@ fun Create(
                 style = MaterialTheme.typography.bodySmall)
         }
         if (!big) Text("Memory use")
-        if (!big) SingleChoiceSegmentedButtonRow {
-            MEMORY_MODES.forEachIndexed { i, (name, _) ->
-                SegmentedButton(selected = s.memoryMode == i, onClick = { onMemoryMode(i) }, enabled = !s.busy,
-                    shape = SegmentedButtonDefaults.itemShape(i, MEMORY_MODES.size)) { Text(name) }
-            }
-        }
+        if (!big) PillChoices(MEMORY_MODES.map { it.first }, s.memoryMode, enabled = !s.busy) { onMemoryMode(it) }
         if (!big) Text(MEMORY_MODES[s.memoryMode].second, style = MaterialTheme.typography.bodySmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Model: $modelLabel", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
@@ -724,8 +701,11 @@ fun Create(
         // (or a double tap) cannot add it twice
         var adding by remember { mutableStateOf(false) }
         val addScope = rememberCoroutineScope()
-        Button(onClick = {
-            if (adding) return@Button
+        BigButton(if (adding) "Adding…" else if (myTask != null) "Add to queue (after the update)" else "Add to queue",
+            icon = AppIcons.Brush, busy = adding,
+            enabled = !adding && myTask == null && s.prompt.isNotBlank() && installed && !fiboNeedsPicture,
+            modifier = Modifier.fillMaxWidth(), onClick = {
+            if (adding) return@BigButton
             adding = true
             addScope.launch {
                 try {
@@ -740,13 +720,7 @@ fun Create(
                     s.status = "Could not add to the queue: ${e.message}"
                 } finally { adding = false }
             }
-        }, enabled = !adding && myTask == null && s.prompt.isNotBlank() && installed && !fiboNeedsPicture, modifier = Modifier.fillMaxWidth()) {
-            if (adding) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(8.dp))
-                Text("Adding…")
-            } else Text(if (myTask != null) "Add to queue (after the update)" else "Add to queue")
-        }
+        })
     }
     val result: @Composable ColumnScope.() -> Unit = {
         // the newest finished picture from this screen, and how the queue is doing
@@ -775,14 +749,14 @@ fun Create(
             if (clip != null) GifPlayer(clip, Modifier.fillMaxWidth().aspectRatio(bmp.width.toFloat() / bmp.height))
             else Image(bmp.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(bmp.width.toFloat() / bmp.height))
             if (clip == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
+                Pill(if (s.savedFor === bmp) "Saved" else "Save", enabled = !s.busy && s.savedFor !== bmp) {
                     scope.launch(Dispatchers.IO) {
                         Gallery.save(ctx, bmp, s.prompt, s.seed, if (anima) s.steps else 4, s.pictureMs)
                         s.savedFor = bmp
                         s.status = "Saved to Pictures/Anima (${bmp.width}×${bmp.height})"
                     }
-                }, enabled = !s.busy && s.savedFor !== bmp) { Text(if (s.savedFor === bmp) "Saved" else "Save") }
-                if (bmp.width == s.genW && animaInstalled) OutlinedButton(onClick = {
+                }
+                if (bmp.width == s.genW && animaInstalled) Pill("Upscale 4×", enabled = !s.busy && !Installer.isRunning("anima")) {
                     s.busy = true
                     scope.launch {
                         val w = bmp.width
@@ -795,7 +769,7 @@ fun Create(
                         }
                         s.busy = false
                     }
-                }, enabled = !s.busy && !Installer.isRunning("anima")) { Text("Upscale 4×") }
+                }
             }
         }
     }
@@ -847,7 +821,7 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
             }) { Icon(AppIcons.SelectAll, if (chosen.size == items.size) "Choose none" else "Choose all") }
             IconButton(onClick = { asking = true }, enabled = chosen.isNotEmpty()) { Icon(AppIcons.Delete, "Delete chosen") }
         } else ChatBar(openMenu, "Gallery", buttons = 1) {
-            IconButton(onClick = { choosing = true }, enabled = items.isNotEmpty()) { Icon(AppIcons.SelectAll, "Choose pictures") }
+            Pill("Select", enabled = items.isNotEmpty(), modifier = Modifier.padding(end = 12.dp)) { choosing = true }
         }
         if (asking) AlertDialog(onDismissRequest = { asking = false },
             title = { Text(if (chosen.size == 1) "Delete this picture?" else "Delete ${chosen.size} pictures?") },
@@ -866,7 +840,7 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
             Text("No saved pictures yet.", Modifier.padding(16.dp))
             return@Column
         }
-        LazyVerticalGrid(if (isWide()) GridCells.Adaptive(170.dp) else GridCells.Fixed(3), Modifier.fillMaxSize().padding(4.dp)) {
+        LazyVerticalGrid(if (isWide()) GridCells.Adaptive(170.dp) else GridCells.Fixed(3), Modifier.fillMaxSize().padding(horizontal = 13.dp, vertical = 4.dp)) {
             items(items, key = { it.uri.toString() }) { e ->
                 // each preview is made when its square comes into view, and kept for next time
                 val thumb by produceState(Gallery.cachedThumbnail(e, 384), e.uri) {
@@ -875,11 +849,11 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
                 val key = e.uri.toString()
                 val on = key in chosen
                 fun toggle() { chosen = if (on) chosen - key else chosen + key }
-                Box(Modifier.padding(2.dp).aspectRatio(1f).combinedClickable(
+                Box(Modifier.padding(3.dp).aspectRatio(1f).clip(RoundedCornerShape(12.dp)).background(LocalPaper.current.card).combinedClickable(
                     onClick = { if (choosing) toggle() else onOpen(e) },
                     onLongClick = { if (!choosing) { choosing = true; chosen = setOf(key) } else toggle() })) {
                     thumb?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize().padding(if (on) 10.dp else 0.dp)
-                        .clip(RoundedCornerShape(if (on) 10.dp else 0.dp)), contentScale = ContentScale.Crop) }
+                        .clip(RoundedCornerShape(if (on) 8.dp else 0.dp)), contentScale = ContentScale.Crop) }
                     if (choosing) Box(Modifier.align(Alignment.TopStart).padding(6.dp).size(24.dp).clip(CircleShape)
                         .background(if (on) scheme.surface else Color.Black.copy(alpha = 0.25f))) {
                         if (on) Icon(AppIcons.CheckCircle, null, Modifier.fillMaxSize(), tint = scheme.primary)
@@ -904,8 +878,8 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
     LaunchedEffect(e) { bmp = withContext(Dispatchers.IO) { gif = Gallery.isClip(ctx, e); Gallery.full(ctx, e) } }
     val picture: @Composable () -> Unit = {
         bmp?.let {
-            if (gif) GifPlayer(e.uri, Modifier.fillMaxWidth().aspectRatio(it.width.toFloat() / it.height))
-            else Image(it.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(it.width.toFloat() / it.height))
+            val m = Modifier.fillMaxWidth().aspectRatio(it.width.toFloat() / it.height).clip(RoundedCornerShape(14.dp))
+            if (gif) GifPlayer(e.uri, m) else Image(it.asImageBitmap(), null, m)
         }
     }
     val wide = isWide()
@@ -923,19 +897,19 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
         androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Button(onClick = { onUse(e) }) { Text("Use this prompt") }
-            OutlinedButton(onClick = {
+            Pill("Share", modifier = Modifier.height(40.dp)) {
                 val send = Intent(Intent.ACTION_SEND).setType(Gallery.mime(ctx, e)).putExtra(Intent.EXTRA_STREAM, e.uri)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 ctx.startActivity(Intent.createChooser(send, "Share picture"))
-            }) { Text("Share") }
-            OutlinedButton(onClick = { scope.launch(Dispatchers.IO) { Gallery.delete(ctx, e); withContext(Dispatchers.Main) { onBack() } } },
-                enabled = !upscaling) { Text("Delete") }
+            }
+            Pill("Delete", enabled = !upscaling, modifier = Modifier.height(40.dp)) {
+                scope.launch(Dispatchers.IO) { Gallery.delete(ctx, e); withContext(Dispatchers.Main) { onBack() } } }
         }
         // 4x bigger, in place of this picture. Up to 1024 on the long side: 4x of more would not fit in memory.
         val b = bmp
         // the upscaler runs on the AI chip: phones without one never get it, so no button that can only say "download Anima"
         if (Chip.supported && !gif && b != null && maxOf(b.width, b.height) <= 1024) {
-            OutlinedButton(onClick = {
+            Pill("Upscale 4× (replaces this picture)", enabled = !upscaling && Upscaler.available(ctx)) {
                 upscaling = true
                 note = if (QueueService.progress.value.first.isNotEmpty()) "Upscaling after the picture being drawn…" else "Upscaling…"
                 // not this screen's scope: leaving the screen must not drop the bigger picture half way
@@ -953,16 +927,16 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
                         upscaling = false
                     }
                 }
-            }, enabled = !upscaling && Upscaler.available(ctx)) { Text("Upscale 4× (replaces this picture)") }
+            }
             if (!Upscaler.available(ctx)) Text("The upscaler comes with Anima: download Anima to use it.", style = MaterialTheme.typography.bodySmall)
         }
         if (note.isNotEmpty()) Text(note, style = MaterialTheme.typography.bodySmall)
         // any picture as a home-screen icon: Android only lets the launcher icon itself be one of the built-in ones
-        OutlinedButton(onClick = {
-            val b2 = bmp ?: return@OutlinedButton
+        Pill("Add to home screen as an icon", enabled = bmp != null) {
+            val b2 = bmp ?: return@Pill
             if (!AppIcon.pinPicture(ctx, b2, e.seed.toString() + "-" + e.uri.lastPathSegment))
                 android.widget.Toast.makeText(ctx, "This launcher cannot add shortcuts", android.widget.Toast.LENGTH_SHORT).show()
-        }, enabled = bmp != null) { Text("Add to home screen as an icon") }
+        }
     }
     }
 }

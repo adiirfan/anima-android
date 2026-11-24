@@ -271,18 +271,17 @@ private fun Conversation(chat: ChatController, convId: String?, conv: Conversati
 @Composable
 fun ChatBar(onMenu: () -> Unit, title: String, subtitle: String = "", buttons: Int = 0,
             actions: (@Composable () -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        // wide screens keep the menu open at the side: no menu button, the same space keeps the title centred
-        if (isWide()) Spacer(Modifier.width(48.dp)) else IconButton(onClick = onMenu) { Icon(AppIcons.Menu, "Menu") }
-        // as wide on the left as the page's buttons on the right, so the title sits in the middle
-        if (buttons > 1) Spacer(Modifier.width((48 * (buttons - 1)).dp))
-        Column(Modifier.weight(1f).padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (subtitle.isNotEmpty()) Text(subtitle, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+    // Paper: the page name large and on the left, the page's own buttons on the right (2026-11-24). [buttons] is no
+    // longer needed for centring and is ignored.
+    Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        // wide screens keep the pages at the side: no menu button
+        if (isWide()) Spacer(Modifier.width(12.dp)) else IconButton(onClick = onMenu) { Icon(AppIcons.Menu, "Menu") }
+        Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
+            Text(title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (subtitle.isNotEmpty()) Text(subtitle, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        // a page without buttons of its own keeps the title centred
-        if (actions != null) Row { actions() } else Spacer(Modifier.width(48.dp))
+        if (actions != null) Row(verticalAlignment = Alignment.CenterVertically) { actions() }
     }
 }
 
