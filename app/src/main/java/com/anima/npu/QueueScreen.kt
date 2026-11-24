@@ -34,6 +34,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -82,17 +85,34 @@ internal fun modelName(j: Job) = when (j.model) {
     else -> "Anima"
 }
 
+/** How many jobs a section shows at first, and how many more each "Show more" adds: hundreds at once made the page slow. */
+internal const val QUEUE_PAGE = 30
+
+/** The "Show more" button's text, or null when every job is already shown. */
+internal fun moreLabel(total: Int, shown: Int): String? =
+    (total - shown).takeIf { it > 0 }?.let { "Show ${minOf(it, QUEUE_PAGE)} more" }
+
+/** A drawing picture's one line in chat: the progress alone ("Step 4 of 8"), the spinner beside it says it is drawing. */
+internal fun drawingLine(progress: String): String =
+    progress.trim().replaceFirstChar { it.uppercase() }.ifEmpty { "Drawing…" }
+
 /** Every job, newest first: cancel what is waiting, retry what failed, open what is done. */
 @Composable
 fun QueueScreen(onOpen: (Gallery.Entry) -> Unit, onBack: () -> Unit) {
     val ctx = LocalContext.current
+    // Back returns to the page the queue was opened from instead of leaving the app
+    BackHandler(onBack = onBack)
     val tick by Queue.store.changed.collectAsState()
     val progress by QueueService.progress.collectAsState()
     val jobs = remember(tick) { Queue.store.all().reversed() }
     val thumbs = remember { mutableStateMapOf<String, Bitmap>() }
-    LaunchedEffect(tick) {
+    var shownWaiting by remember { mutableIntStateOf(QUEUE_PAGE) }
+    var shownFinished by remember { mutableIntStateOf(QUEUE_PAGE) }
+    LaunchedEffect(tick, shownFinished) {
         withContext(Dispatchers.IO) {
-            for (j in jobs) if (j.state == JobState.DONE && j.resultUri != null && j.id !in thumbs) {
+            // only the finished jobs on screen: hundreds of thumbnails at once made the page slow
+            val onScreen = jobs.filter { it.state == JobState.DONE || it.state == JobState.FAILED || it.state == JobState.CANCELLED }.take(shownFinished)
+            for (j in onScreen) if (j.state == JobState.DONE && j.resultUri != null && j.id !in thumbs) {
                 val e = Gallery.Entry(android.net.Uri.parse(j.resultUri), j.prompt, j.seed, j.steps, j.ms, j.width, 0, j.height)
                 Gallery.thumbnail(ctx, e, 192)?.let { thumbs[j.id] = it }
             }
@@ -150,12 +170,14 @@ fun QueueScreen(onOpen: (Gallery.Entry) -> Unit, onBack: () -> Unit) {
             }
         }
     }
-    @Composable fun Section(title: String, list: List<Job>) {
+    @Composable fun Section(title: String, list: List<Job>, shown: Int, onMore: () -> Unit) {
         if (list.isEmpty()) return
         SectionLabel(title)
+        val rows = list.take(shown)
         PaperCard(Modifier.fillMaxWidth(), padding = PaddingValues(horizontal = 14.dp)) {
-            list.forEachIndexed { i, j -> JobRow(j, last = i == list.lastIndex) }
+            rows.forEachIndexed { i, j -> JobRow(j, last = i == rows.lastIndex) }
         }
+        moreLabel(list.size, shown)?.let { Pill(it, onClick = onMore) }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -169,16 +191,16 @@ fun QueueScreen(onOpen: (Gallery.Entry) -> Unit, onBack: () -> Unit) {
         if (jobs.isEmpty()) Text("Nothing in the queue.", Modifier.padding(16.dp), color = p.muted)
         val left: @Composable ColumnScope.(Boolean) -> Unit = { big ->
             if (drawing.isNotEmpty()) { SectionLabel("Drawing now"); drawing.forEach { DrawingCard(it, big) } }
-            Section("Waiting · ${waiting.size}", waiting)
+            Section("Waiting · ${waiting.size}", waiting, shownWaiting) { shownWaiting += QUEUE_PAGE }
         }
         if (isWide()) Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 left(true); Spacer(Modifier.height(16.dp)) }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Section("Finished", finished); Spacer(Modifier.height(16.dp)) }
+                Section("Finished", finished, shownFinished) { shownFinished += QUEUE_PAGE }; Spacer(Modifier.height(16.dp)) }
         } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            left(false); Section("Finished", finished); Spacer(Modifier.height(16.dp))
+            left(false); Section("Finished", finished, shownFinished) { shownFinished += QUEUE_PAGE }; Spacer(Modifier.height(16.dp))
         }
     }
 }

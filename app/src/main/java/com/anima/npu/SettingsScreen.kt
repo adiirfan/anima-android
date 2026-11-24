@@ -47,7 +47,9 @@ fun SettingsScreen(onSetup: () -> Unit) {
     val models: @Composable ColumnScope.() -> Unit = {
         SectionLabel("Models")
         PaperCard(padding = PaddingValues(horizontal = 16.dp)) {
-            val onPhone = remember { ModelStore.ALL.count { it.active(ctx).installed(ctx) != null } }
+            // counted again whenever a download finishes, so a model that just arrived shows up at once
+            val downloaded = Installer.tasks.values.count { !it.running && !it.failed }
+            val onPhone = remember(downloaded) { ModelStore.ALL.count { it.active(ctx).installed(ctx) != null } }
             PaperRow(Modifier.clickable(onClick = onSetup)) {
                 Column(Modifier.weight(1f)) {
                     RowTitle("Model management")

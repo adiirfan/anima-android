@@ -500,7 +500,7 @@ private fun PictureCard(jobId: String, onOpen: (Gallery.Entry) -> Unit) {
             val what = when (j?.state) {
                 null -> "This picture is no longer in the queue"
                 JobState.WAITING -> "Waiting in the queue…"
-                JobState.DRAWING -> "Drawing" + (if (progress.first == jobId && progress.second.isNotEmpty()) ": ${progress.second}" else "…")
+                JobState.DRAWING -> drawingLine(if (progress.first == jobId) progress.second else "")
                 JobState.FAILED -> j.error?.trim()?.takeIf { it.isNotEmpty() }?.let { "Failed · $it" } ?: "Failed"
                 JobState.CANCELLED -> "Cancelled"
                 JobState.DONE -> "Loading…"
@@ -510,7 +510,9 @@ private fun PictureCard(jobId: String, onOpen: (Gallery.Entry) -> Unit) {
                     CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.width(10.dp))
                 }
-                Text(what, Modifier.weight(1f), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // one line while waiting or drawing; a failure's reason may need two
+                Text(what, Modifier.weight(1f), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = if (j?.state == JobState.FAILED) 2 else 1, overflow = TextOverflow.Ellipsis)
                 if (j?.state == JobState.FAILED || j?.state == JobState.CANCELLED) IconButton(onClick = {
                     Queue.store.update(j.id) { it.copy(state = JobState.WAITING, error = null, tries = 0) }
                     QueueService.kick(ctx)

@@ -16,3 +16,11 @@ class QueueTextTest {
 
     @Test fun waitingUnchanged() = assertEquals("Waiting", stateText(job(JobState.WAITING), "" to ""))
 }
+
+class QueuePagingTest {
+    @Test fun fewJobsNoButton() = assertEquals(null, moreLabel(total = 12, shown = 30))
+    @Test fun manyJobsNextPage() = assertEquals("Show 30 more", moreLabel(total = 200, shown = 30))
+    @Test fun lastPageIsSmaller() = assertEquals("Show 5 more", moreLabel(total = 65, shown = 60))
+    @Test fun drawingShowsProgressAlone() = assertEquals("Reading the prompt", drawingLine("reading the prompt"))
+    @Test fun drawingWithoutProgress() = assertEquals("Drawing…", drawingLine(""))
+}
