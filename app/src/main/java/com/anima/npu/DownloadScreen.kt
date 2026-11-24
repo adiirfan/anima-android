@@ -1,5 +1,6 @@
 package com.anima.npu
 
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -75,7 +76,7 @@ fun DownloadScreen(
                     else -> v.files.sumOf { it.size }
                 }
                 val pickable = !busy && (update || v.id != current)
-                Card(Modifier.fillMaxWidth().clickable(enabled = pickable) { choice = v.id }) {
+                PaperCard(Modifier.fillMaxWidth().clickable(enabled = pickable) { choice = v.id }, padding = PaddingValues(0.dp)) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(selected = choice == v.id, onClick = { choice = v.id }, enabled = pickable)
                         Column(Modifier.padding(start = 8.dp)) {
@@ -92,7 +93,7 @@ fun DownloadScreen(
                 Button(onClick = { Installer.start(ctx, store, m, choice, beforeSwap) }, enabled = !busy && (update || choice != current)) {
                     Text(if (current == null) "Download" else if (update) "Update" else "Switch")
                 }
-                if (busy) OutlinedButton(onClick = { Installer.cancel(store.id) }) { Text("Cancel") }
+                if (busy) Pill("Cancel", onClick = { Installer.cancel(store.id) })
             }
             if (busy) LinearProgressIndicator(progress = { task?.fraction ?: 0f }, modifier = Modifier.fillMaxWidth())
             task?.status?.takeIf { it.isNotEmpty() }?.let { Text(it) }

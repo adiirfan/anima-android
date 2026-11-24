@@ -1,5 +1,6 @@
 package com.anima.npu
 
+import androidx.compose.foundation.layout.PaddingValues
 import android.os.StatFs
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -112,7 +113,7 @@ fun SetupScreen(firstRun: Boolean, onDone: () -> Unit) {
             val have = st.installed(ctx) != null
             val size = sizeOf(st)
             val can = st.available && !have && size != null && !started
-            Card(Modifier.fillMaxWidth().clickable(enabled = can) { chosen[st.id] = chosen[st.id] != true }) {
+            PaperCard(Modifier.fillMaxWidth().clickable(enabled = can) { chosen[st.id] = chosen[st.id] != true }, padding = PaddingValues(0.dp)) {
                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = can && chosen[st.id] == true || have, onCheckedChange = { chosen[st.id] = it }, enabled = can)
                     Column(Modifier.padding(start = 8.dp).weight(1f)) {
@@ -163,7 +164,7 @@ fun SetupScreen(firstRun: Boolean, onDone: () -> Unit) {
                 }, enabled = picked.isNotEmpty() && total <= free) {
                     Text(if (picked.size == 1) "Download 1 model" else "Download ${picked.size} models")
                 }
-                OutlinedButton(onClick = onDone) { Text(if (firstRun) "Skip" else "Back") }
+                Pill(if (firstRun) "Skip" else "Back", onClick = onDone)
             }
         } else {
             Text(if (Installer.running) "Downloading. You can start using the app; each model appears as it finishes."

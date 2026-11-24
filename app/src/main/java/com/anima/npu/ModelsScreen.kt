@@ -1,5 +1,6 @@
 package com.anima.npu
 
+import androidx.compose.foundation.layout.PaddingValues
 import android.os.StatFs
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
@@ -114,9 +115,7 @@ fun ModelsScreen(onChanged: () -> Unit, onBack: () -> Unit) {
         TextButton(onClick = onBack) { Text("‹ Back") }
         Text("Model Management", style = MaterialTheme.typography.headlineSmall)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { scope.launch { check() } }, enabled = !checking) {
-                Text(if (checking) "Checking…" else "Check for updates")
-            }
+            Pill(if (checking) "Checking…" else "Check for updates", enabled = !checking) { scope.launch { check() } }
             val free = remember(tick) { runCatching { StatFs(ctx.getExternalFilesDir(null)!!.path).availableBytes }.getOrDefault(0L) }
             Text("Free: ${gb(free)}", style = MaterialTheme.typography.bodySmall)
         }
@@ -125,20 +124,19 @@ fun ModelsScreen(onChanged: () -> Unit, onBack: () -> Unit) {
         for (model in models) {
             // read again after deletes, switches and finished downloads
             val gpuOn = remember(tick) { model.runsOnGpu(ctx) }
-            Card(Modifier.fillMaxWidth()) {
+            PaperCard(Modifier.fillMaxWidth(), padding = PaddingValues(0.dp)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(model.title, style = MaterialTheme.typography.titleMedium)
                     val g = model.gpu?.takeIf { it.available }
                     // every model shows the choice; a side with no build yet is greyed out and says so
                     run {
                         Text(if (model in ModelStore.SETUP_CHAT) "Runs on" else "Draws on", style = MaterialTheme.typography.labelMedium)
-                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            listOf(false to "AI chip", true to "Graphics chip").forEachIndexed { i, (on, label) ->
-                                val exists = if (on) g != null || model.sameFilesOnGpu else model.aiChip
-                                SegmentedButton(selected = exists && gpuOn == on, enabled = exists, onClick = {
-                                    if (gpuOn != on) { model.setRunsOnGpu(ctx, on); tick++; onChanged() }
-                                }, shape = SegmentedButtonDefaults.itemShape(i, 2)) { Text(label) }
-                            }
+                        val sides = listOf(false, true)
+                        fun exists(on: Boolean) = if (on) g != null || model.sameFilesOnGpu else model.aiChip
+                        PillChoices(listOf("AI chip", "Graphics chip"), if (exists(gpuOn)) sides.indexOf(gpuOn) else -1,
+                            enabledAt = { exists(sides[it]) }) { i ->
+                            val on = sides[i]
+                            if (gpuOn != on) { model.setRunsOnGpu(ctx, on); tick++; onChanged() }
                         }
                         if (!model.aiChip) Text("AI chip: no build for this phone yet.", style = MaterialTheme.typography.bodySmall)
                         if (g == null && !model.sameFilesOnGpu) Text("Graphics chip: not built yet.", style = MaterialTheme.typography.bodySmall)
@@ -215,14 +213,14 @@ private fun BuildRow(
     // wraps onto a second line when Update, Download again and Delete do not fit side by side
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         when {
-            busy -> OutlinedButton(onClick = { Installer.cancel(b.id) }) { Text("Cancel") }
+            busy -> Pill("Cancel", onClick = { Installer.cancel(b.id) })
             variant == null -> Button(onClick = { onStart(false) }, enabled = m != null) { Text("Download") }
             else -> {
                 if (changed.isNotEmpty()) Button(onClick = { onStart(false) }, enabled = !inUse) { Text("Update") }
-                OutlinedButton(onClick = onRedownload, enabled = m != null && !inUse) { Text("Download again") }
-                OutlinedButton(onClick = onDelete, enabled = !inUse) { Text("Delete") }
+                Pill("Download again", enabled = m != null && !inUse, onClick = onRedownload)
+                Pill("Delete", enabled = !inUse, onClick = onDelete)
             }
         }
-        b.pageUrl?.let { url -> OutlinedButton(onClick = { uri.openUri(url) }) { Text("Model page") } }
+        b.pageUrl?.let { url -> Pill("Model page") { uri.openUri(url) } }
     }
 }

@@ -1,5 +1,6 @@
 package com.anima.npu
 
+import androidx.compose.foundation.border
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -234,7 +235,8 @@ private fun Conversation(chat: ChatController, convId: String?, conv: Conversati
 
         // the composer
         Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp).fillMaxWidth()
-            .clip(RoundedCornerShape(26.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clip(RoundedCornerShape(26.dp)).background(LocalPaper.current.card)
+            .border(1.dp, LocalPaper.current.line, RoundedCornerShape(26.dp))
             .padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 8.dp)) {
             val scheme = MaterialTheme.colorScheme
             BasicTextField(text, { text = it }, Modifier.fillMaxWidth(), maxLines = 6,
@@ -355,9 +357,9 @@ private fun MessageRow(m: Msg, dir: File, onOpen: (Gallery.Entry) -> Unit, bubbl
                 b?.let { Image(it.asImageBitmap(), null, Modifier.padding(bottom = 6.dp).size(140.dp).clip(RoundedCornerShape(14.dp)),
                     contentScale = ContentScale.Crop) }
             }
-            if (m.text.isNotBlank()) RichText(m.text, scheme.onPrimaryContainer,
+            if (m.text.isNotBlank()) RichText(m.text, LocalPaper.current.onAccent,
                 modifier = Modifier.widthIn(max = bubble)
-                    .clip(RoundedCornerShape(16.dp)).background(scheme.primaryContainer)
+                    .clip(RoundedCornerShape(18.dp, 18.dp, 6.dp, 18.dp)).background(LocalPaper.current.accent)
                     .combinedClickable(onClick = {}, onLongClick = { copy(ctx, m.text) })
                     .padding(horizontal = 14.dp, vertical = 10.dp))
         }
@@ -396,7 +398,8 @@ private fun Reply(text: String, thinking: String, actions: Boolean, bubble: Dp) 
         if (text.isNotBlank()) {
             SelectionContainer {
                 RichText(text, MaterialTheme.colorScheme.onSurface, modifier = Modifier.widthIn(max = bubble)
-                    .clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)).background(LocalPaper.current.card)
+                    .border(1.dp, LocalPaper.current.cardLine, RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp))
             }
             if (actions) IconButton(onClick = { copy(ctx, text) }, Modifier.size(32.dp)) {
@@ -428,8 +431,8 @@ private fun PictureCard(jobId: String, onOpen: (Gallery.Entry) -> Unit) {
     val bmp by produceState<Bitmap?>(null, entry) {
         value = entry?.let { e -> withContext(Dispatchers.IO) { Gallery.thumbnail(ctx, e, 512) } }
     }
-    Box(Modifier.widthIn(max = 280.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp))
-        .background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
+    Box(Modifier.widthIn(max = 280.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp))
+        .background(LocalPaper.current.card).border(1.dp, LocalPaper.current.cardLine, RoundedCornerShape(18.dp))) {
         val b = bmp
         if (b != null && entry != null) {
             Image(b.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(b.width.toFloat() / b.height)
