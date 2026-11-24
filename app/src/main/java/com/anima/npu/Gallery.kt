@@ -17,7 +17,10 @@ import java.io.File
  * the prompt, seed and steps of each are kept in files/gallery.json, keyed by the picture's address.
  */
 object Gallery {
-    data class Entry(val uri: Uri, val prompt: String, val seed: Long, val steps: Int, val ms: Long, val width: Int, val savedAt: Long, val height: Int = width)
+    /** [kind]: "edit" for a picture made from another picture (an edit or an upscale), else "picture" (also for
+     *  pictures saved before 2026-11-24, which did not record it). Clips are told apart by their file type. */
+    data class Entry(val uri: Uri, val prompt: String, val seed: Long, val steps: Int, val ms: Long, val width: Int, val savedAt: Long,
+                     val height: Int = width, val kind: String = "picture")
 
     private fun index(ctx: Context) = File(ctx.getExternalFilesDir(null), "gallery.json")
 
@@ -28,7 +31,8 @@ object Gallery {
         return MutableList(a.length()) { i ->
             val o = a.getJSONObject(i)
             Entry(Uri.parse(o.getString("uri")), o.getString("prompt"), o.getLong("seed"), o.getInt("steps"),
-                o.optLong("ms"), o.optInt("width", 512), o.optLong("savedAt"), o.optInt("height", o.optInt("width", 512)))
+                o.optLong("ms"), o.optInt("width", 512), o.optLong("savedAt"), o.optInt("height", o.optInt("width", 512)),
+                o.optString("kind", "picture"))
         }
     }
 
@@ -36,7 +40,7 @@ object Gallery {
         val a = JSONArray()
         list.forEach { e ->
             a.put(JSONObject().put("uri", e.uri.toString()).put("prompt", e.prompt).put("seed", e.seed)
-                .put("steps", e.steps).put("ms", e.ms).put("width", e.width).put("height", e.height).put("savedAt", e.savedAt))
+                .put("steps", e.steps).put("ms", e.ms).put("width", e.width).put("height", e.height).put("savedAt", e.savedAt).put("kind", e.kind))
         }
         index(ctx).writeText(a.toString())
     }
@@ -79,13 +83,13 @@ object Gallery {
         android.media.MediaScannerConnection.scanFile(ctx, arrayOf(path), null, null)
     }
 
-    fun save(ctx: Context, bmp: Bitmap, prompt: String, seed: Long, steps: Int, ms: Long): Entry {
+    fun save(ctx: Context, bmp: Bitmap, prompt: String, seed: Long, steps: Int, ms: Long, kind: String = "picture"): Entry {
         val now = System.currentTimeMillis()
         val r = ctx.contentResolver
         val uri = create(ctx, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "anima_${now}_$seed.png", "image/png", "picture")
         r.openOutputStream(uri)!!.use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         finish(ctx, uri)
-        val e = Entry(uri, prompt, seed, steps, ms, bmp.width, now, bmp.height)
+        val e = Entry(uri, prompt, seed, steps, ms, bmp.width, now, bmp.height, kind)
         write(ctx, read(ctx).apply { add(0, e) })
         return e
     }
@@ -125,7 +129,9 @@ object Gallery {
     /** Puts [bmp] in place of [old]: a new file with the same prompt, seed and place in the list; the old file is
      *  deleted, and queue jobs that pointed at it point at the new one. */
     fun replace(ctx: Context, old: Entry, bmp: Bitmap): Entry {
-        val e = save(ctx, bmp, old.prompt, old.seed, old.steps, old.ms).copy(savedAt = old.savedAt)
+        // the kind as the gallery recorded it: [old] may be rebuilt from a queue job, which does not know it
+        val kind = read(ctx).firstOrNull { it.uri == old.uri }?.kind ?: old.kind
+        val e = save(ctx, bmp, old.prompt, old.seed, old.steps, old.ms, kind).copy(savedAt = old.savedAt)
         runCatching { ctx.contentResolver.delete(old.uri, null, null) }
         write(ctx, read(ctx).filter { it.uri != old.uri && it.uri != e.uri }.toMutableList().apply { add(0, e) })
         Queue.store.all().filter { it.resultUri == old.uri.toString() }.forEach { j ->

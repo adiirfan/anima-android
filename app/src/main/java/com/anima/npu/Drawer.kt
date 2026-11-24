@@ -35,7 +35,7 @@ object Drawer {
             val t = System.currentTimeMillis()
             val big = Upscaler.upscale(ctx, s)
             val ms = System.currentTimeMillis() - t
-            return@withContext Result(big, Gallery.save(ctx, big, j.prompt, j.seed, 0, ms), ms)
+            return@withContext Result(big, Gallery.save(ctx, big, j.prompt, j.seed, 0, ms, kind = "edit"), ms)
         }
         if (j.model == "wan") {
             val e = src?.let { guidePixels(it, w, h) } ?: error("Wan makes a clip from a picture: choose a picture to animate")
@@ -111,7 +111,10 @@ object Drawer {
         // Settings: "Upscale every new picture" (skipped without Anima, which holds the upscaler)
         if (Upscaler.auto(ctx) && Upscaler.available(ctx)) bmp = Upscaler.upscale(ctx, bmp)
         val ms = System.currentTimeMillis() - t0
-        val entry = Gallery.save(ctx, bmp, j.prompt, j.seed, when (j.model) { "anima" -> j.steps; "qwen", "moss", "krea" -> 8; else -> 4 }, ms)
+        // the gallery's Edits filter: a picture made from another one by an editing model (Anima's guide picture only
+        // guides the layout, so that drawing stays a Picture)
+        val kind = if (j.sourceFile != null && j.model in setOf("klein", "qwen", "fibo")) "edit" else "picture"
+        val entry = Gallery.save(ctx, bmp, j.prompt, j.seed, when (j.model) { "anima" -> j.steps; "qwen", "moss", "krea" -> 8; else -> 4 }, ms, kind)
         Result(bmp, entry, ms)
     }
 }
