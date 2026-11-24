@@ -329,9 +329,20 @@ class ReleaseCheck {
         }
     }
 
+    /** A picture the check drew itself (never one of the phone owner's), drawn now with Anima when the drawing
+     *  test did not run first. */
+    private fun picture(): Uri? {
+        ownPicture?.let { return it }
+        if (!installed("anima")) { log("no picture drawn on this phone: nothing to change"); return null }
+        pickModel("Anima")
+        setPrompt("masterpiece, best quality, safe, 1girl, solo, silver hair, cherry blossoms, outdoors")
+        Upscaler.setAuto(ctx, false)
+        return Uri.parse(draw("anima", minutes = 5).resultUri).also { ownPicture = it }
+    }
+
     @Test fun d_picturesCanBeChangedAndAnimated() {
-        val pic = ownPicture ?: run { log("no picture drawn on this phone: nothing to change"); return }
         go("Create")
+        val pic = picture() ?: return
         for (c in menu) {
             if (!installed(c.id)) continue
             val edits = c.id in NEEDS_PICTURE || c.id == "klein" || (c.id == "qwen" && ModelStore.QWEN.installed(ctx) != "small")
@@ -347,15 +358,27 @@ class ReleaseCheck {
             } else draw(c.id, minutes = 10)
             scrollTo(By.text("Remove"), "the Remove button").click()
         }
-        if (installed("anima")) {   // Anima follows a guide picture, and its result can be made 4x bigger
-            log("Anima with a guide picture, then 4x")
-            pickModel("Anima")
-            setPrompt("masterpiece, best quality, safe, 1girl, solo, smile, outdoors")
-            choosePicture(By.text("Guide picture"), pic)
-            draw("anima", minutes = 5)
-            scrollTo(By.text("Upscale 4×"), "the Upscale button").click()
-            need(By.textStartsWith("Upscaled to"), "the 4x picture", ms = 120_000)
-        }
+    }
+
+    // Anima follows a guide picture, and its result can be made 4x bigger
+    @Test fun da_animaFollowsAGuideAndUpscales() {
+        if (!installed("anima")) { log("Anima is not on this phone"); return }
+        go("Create")
+        val pic = picture() ?: return
+        log("Anima with a guide picture, then 4x")
+        pickModel("Anima")
+        setPrompt("masterpiece, best quality, safe, 1girl, solo, smile, outdoors")
+        choosePicture(By.text("Guide picture"), pic)
+        // "Upscale every new picture" on: the result is already 4x, and must not be offered 4x again (that crashed
+        // the app out of memory, 2026-11-24)
+        Upscaler.setAuto(ctx, true)
+        draw("anima", minutes = 5)
+        scrollTo(By.text("Use as guide"), "the picture's buttons")
+        if (device.hasObject(By.text("Upscale 4×"))) fail("an upscaled picture is offered Upscale 4× again")
+        Upscaler.setAuto(ctx, false)
+        draw("anima", minutes = 5)
+        scrollTo(By.text("Upscale 4×"), "the Upscale button").click()
+        need(By.textStartsWith("Upscaled to"), "the 4x picture", ms = 120_000)
     }
 
     @Test fun e_chatAnswersAndDraws() {
@@ -367,9 +390,9 @@ class ReleaseCheck {
         need(By.text("Draw this?"), "the picture card in the chat", ms = 300_000)
         val before = Queue.store.all().map { it.id }.toSet()
         need(By.text("Draw"), "the card's Draw button").click()
-        val drawn = poll(30_000) { Queue.store.all().firstOrNull { it.id !in before && it.origin == "chat" } }
+        val drawn = poll(30_000) { Queue.store.all().firstOrNull { it.id !in before && it.origin.startsWith("chat:") } }
         val job = waitForJob((drawn ?: error("the card added no job")).model, before, minutes = 10)
-        assertEquals("chat", job.origin)
+        assertTrue("not marked as from the chat: ${job.origin}", job.origin.startsWith("chat:"))
         // and a plain answer, in the same chat
         need(By.res("message"), "the message box").text = "Reply with one word: hello"
         need(By.desc("Send"), "the Send button").click()
