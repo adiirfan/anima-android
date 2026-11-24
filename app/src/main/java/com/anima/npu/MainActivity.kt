@@ -33,6 +33,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -408,7 +411,7 @@ class MainActivity : ComponentActivity() {
                                     selectedContainerColor = paper.soft, unselectedContainerColor = Color.Transparent,
                                     selectedIconColor = paper.softText, unselectedIconColor = paper.muted,
                                     selectedTextColor = paper.text, unselectedTextColor = paper.muted),
-                                modifier = Modifier.padding(horizontal = 12.dp))
+                                modifier = Modifier.padding(horizontal = 12.dp).testTag("nav-$label"))
                         val here = downloadFor == null && open == null && !showQueue
                         item("Create", AppIcons.Create, here && tab == 0) { go(0) }
                         item("Chat", AppIcons.Chat, here && tab == 1) { go(1) }
@@ -507,7 +510,8 @@ class MainActivity : ComponentActivity() {
                 }
                 // wide (unfolded): a slim strip of the pages down the side, always there (the open menu, 232 dp, left the
                 // Create settings too cramped on a Fold's inner screen); narrow: the menu slides out from its button
-                if (wide) Row(Modifier.fillMaxSize()) {
+                // labels on buttons become ids the on-phone release check (androidTest/ReleaseCheck) can find
+                if (wide) Row(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
                     val qTick by Queue.store.changed.collectAsState()
                     val waiting = remember(qTick) { Queue.store.waitingCount() }
                     val here = downloadFor == null && open == null && !showQueue
@@ -515,7 +519,7 @@ class MainActivity : ComponentActivity() {
                         header = { Spacer(Modifier.height(10.dp)); AppMark(); Spacer(Modifier.height(10.dp)) }) {
                         @Composable fun rail(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean,
                                              badge: Int = 0, onClick: () -> Unit) =
-                            NavigationRailItem(selected = selected, onClick = onClick,
+                            NavigationRailItem(selected = selected, onClick = onClick, modifier = Modifier.testTag("nav-$label"),
                                 label = { Text(label, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium) },
                                 icon = { if (badge > 0) BadgedBox(badge = { CountBadge(badge) }) { Icon(icon, label) } else Icon(icon, label) },
                                 colors = NavigationRailItemDefaults.colors(indicatorColor = paper.soft,
@@ -531,7 +535,7 @@ class MainActivity : ComponentActivity() {
                     VerticalDivider(color = paper.divider)
                     Box(Modifier.weight(1f)) { body() }
                 }
-                else ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = open == null, drawerContent = {
+                else ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = open == null, modifier = Modifier.semantics { testTagsAsResourceId = true }, drawerContent = {
                     ModalDrawerSheet(Modifier.safeDrawingPadding(), drawerContainerColor = paper.background) { menu() }
                 }) { body() }
             }
@@ -610,7 +614,7 @@ fun Create(
         val modelPicker: @Composable () -> Unit = {
             Box {
                 Pill((choices.firstOrNull { it.id == s.model && (it.drawing == null || it.drawing == s.qwenDrawing) }?.name ?: s.model) + "  ▾",
-                    enabled = !s.busy) { menu = true }
+                    enabled = !s.busy, modifier = Modifier.testTag("model-menu")) { menu = true }
                 DropdownMenu(menu, { menu = false }) {
                     choices.forEach { (id, drawing, name) ->
                         val st = ModelStore.byId(id)
@@ -658,7 +662,7 @@ fun Create(
                         fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     modelPicker()
                 }
-                BasicTextField(s.prompt, { s.prompt = it }, Modifier.fillMaxWidth().heightIn(min = 96.dp), enabled = !s.busy,
+                BasicTextField(s.prompt, { s.prompt = it }, Modifier.fillMaxWidth().heightIn(min = 96.dp).testTag("prompt"), enabled = !s.busy,
                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 17.sp, lineHeight = 26.sp, color = p.text, fontFamily = PaperFont),
                     cursorBrush = androidx.compose.ui.graphics.SolidColor(p.accent))
                 if (qwenSmall) Note("Editing pictures needs the Standard Qwen download (Model: Change).")
@@ -968,7 +972,7 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit, selected:
                 val key = e.uri.toString()
                 val on = key in chosen
                 fun toggle() { chosen = if (on) chosen - key else chosen + key }
-                Box(Modifier.padding(3.dp).aspectRatio(1f)
+                Box(Modifier.testTag("gallery-item").padding(3.dp).aspectRatio(1f)
                     .then(if (selected?.uri == e.uri) Modifier.border(2.dp, LocalPaper.current.accent, RoundedCornerShape(12.dp)).padding(4.dp) else Modifier)
                     .clip(RoundedCornerShape(if (selected?.uri == e.uri) 9.dp else 12.dp)).background(LocalPaper.current.card).combinedClickable(
                     onClick = { if (choosing) toggle() else onOpen(e) },

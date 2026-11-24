@@ -5,6 +5,11 @@
 #   tools/publish-app.sh "one line about what changed"
 set -e
 cd "$(dirname "$0")/.."
+# only a commit that passed tools/release-check.sh, with nothing changed since, goes out
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then echo "Refused: uncommitted changes."; exit 1; fi
+PASS=build/release-check/$(git rev-parse HEAD).pass
+if [ ! -f "$PASS" ]; then echo "Refused: run tools/release-check.sh on this commit first (with a phone on the cable)."; exit 1; fi
+echo "Release check passed on: $(cut -d' ' -f1-2 "$PASS" | paste -sd, -)"
 REPO=${REPO:-adiirfan/anima-android}
 BUILD=$(date +%s)
 ./gradlew assembleDebug -PappBuild=$BUILD -q

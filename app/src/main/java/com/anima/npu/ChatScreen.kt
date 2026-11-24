@@ -39,6 +39,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -245,7 +246,7 @@ private fun Conversation(chat: ChatController, convId: String?, conv: Conversati
             .border(1.dp, LocalPaper.current.line, RoundedCornerShape(26.dp))
             .padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 8.dp)) {
             val scheme = MaterialTheme.colorScheme
-            BasicTextField(text, { text = it }, Modifier.fillMaxWidth(), maxLines = 6,
+            BasicTextField(text, { text = it }, Modifier.fillMaxWidth().testTag("message"), maxLines = 6,
                 textStyle = TextStyle(fontSize = 16.sp, color = scheme.onSurface), cursorBrush = SolidColor(scheme.primary),
                 decorationBox = { inner ->
                     Box { if (text.isEmpty()) Text("Message", fontSize = 16.sp, color = scheme.onSurfaceVariant); inner() }

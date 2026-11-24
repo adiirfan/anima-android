@@ -19,6 +19,7 @@ android {
         versionCode = if (appBuild > 0) appBuild.toInt() else 1
         buildConfigField("long", "APP_BUILD", "${appBuild}L")
         versionName = "0.1"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"   // tools/release-check.sh runs it
         ndk { abiFilters += "arm64-v8a" }
         // Qualcomm's QAIRT folder (for the QNN headers): qnn.sdk.dir in local.properties, or QNN_SDK_ROOT
         val qnnSdk = Properties().apply {
@@ -52,4 +53,10 @@ dependencies {
     implementation("ai.djl.android:tokenizer-native:0.33.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")   // Android's org.json is a stub in JVM tests
+    // the on-phone release check (androidTest/ReleaseCheck.kt): taps through the real app like a person
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
+    androidTestImplementation("androidx.test.espresso:espresso-intents:3.6.1")   // hands the photo picker a test picture
 }
