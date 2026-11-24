@@ -77,7 +77,7 @@ fun SetupScreen(firstRun: Boolean, onDone: () -> Unit) {
             else if (Chip.supported) "Choose what to download. Everything runs on this phone's neural unit (${Chip.label}); " +
                 "nothing is sent anywhere after the download. You can add or remove models later in Settings."
             else "This phone has ${Chip.label}, which has no AI chip the app supports. MOSS-Image (new pictures) and " +
-                "Fibo (picture edits) can still run on its graphics chip, more slowly: several minutes a picture. " +
+                "Fibo (picture edits) can still run on its graphics chip, more slowly. " +
                 "Nothing is sent anywhere after the download.",
             style = MaterialTheme.typography.bodySmall)
 

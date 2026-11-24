@@ -168,7 +168,7 @@ private fun Conversation(chat: ChatController, convId: String?, conv: Conversati
     val status = when (turn.phase) {
         "waiting" -> "Waiting for the current picture…"
         "loading" -> "Loading ${LocalLing.name(ctx)}…"
-        "preparing" -> "Preparing Ling for low memory (first time, about a minute)…"
+        "preparing" -> "Preparing Ling for low memory (first time only)…"
         "thinking" -> "Thinking…"
         "tool" -> "Adding pictures…"
         "writing" -> "Writing…"

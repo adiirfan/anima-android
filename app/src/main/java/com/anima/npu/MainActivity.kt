@@ -181,24 +181,25 @@ fun GifPlayer(uri: Uri, modifier: Modifier = Modifier) {
 
 // Picture sizes the drawing model is built for: per tier, one size per shape. Width/16 x height/16 (the patch
 // count) must divide by 16 - other counts compile into ~4x slower programs on the neural unit.
-// Times are 8 steps on the iQOO 13 (8 Elite).
-val SIZE_TIERS = listOf("512" to "about 6 s", "768" to "about 17 s")
-const val KLEIN_TIME = "4 steps · about 6 s, edits about 13 s"
+// What each model makes, shown under the size choices (2026-11-24: no time estimates; speed differs too much
+// between phones).
+val SIZE_TIERS = listOf("512" to "", "768" to "")
+const val KLEIN_TIME = "4 steps"
 const val KLEIN_GPU_TIME = "8 steps on the graphics chip"
-const val KLEIN_GEN5_TIME = "8 steps · about 45 s, edits about 2.5 min"   // 8 Elite Gen 5 AI-chip build, 768x768
-const val QWEN_TIME = "8 steps · about 3 min 20 s, edits about 5 min"   // Qwen-Image-2.1-Turbo, iQOO 13 2026-11-06
-const val NOCTQ_TIME = "4 steps · about 1 min 20 s, edits about 3 min"
+const val KLEIN_GEN5_TIME = "8 steps"   // 8 Elite Gen 5 AI-chip build, 768x768
+const val QWEN_TIME = "8 steps"
+const val NOCTQ_TIME = "4 steps"
 /** Folder (inside Qwen's) holding Noct Q V4's drawing files, copied over the cable: no download for it. */
 const val NOCTQ_DIR = "noctq"
-const val FIBO_TIME = "edits only · 4 steps · about 1 min 30 s"   // Fibo 2.0 edit-turbo, iQOO 13 2026-11-06
-const val MOSS_TIME = "8 steps · about 1 min 30 s"   // MOSS-Image SFT + 8-step DMD add-on, iQOO 13 2026-11-06
+const val FIBO_TIME = "edits only · 4 steps"
+const val MOSS_TIME = "8 steps"
 /** The models that draw one 768x768 size only, with no size or memory choices. */
 val BIG_MODELS = setOf("qwen", "fibo", "moss", "wan", "krea")
-const val WAN_TIME = "17 frames, a looping video · about 2.5 min on the iQOO 13"
-const val WAN_LONG_TIME = "49 frames, a 3-second video · about 3.5 min"   // the Fold, 2026-11-18 (206 s)
-const val WAN_GPU_TIME = "49 frames, a 3-second video · about 4.5 min on the graphics chip"   // the Fold on Vulkan, 2026-11-24 (227-270 s)
-const val MOSS_GPU_TIME = "8 steps · about 4 min on the graphics chip"   // the Fold in the app, 2026-11-19 (232 s)
-const val FIBO_GPU_TIME = "edits only · 4 steps · about 6 min on the graphics chip"   // the Fold in the app, 2026-11-24: 4-bit file on OpenCL, 331 s of steps
+const val WAN_TIME = "17 frames, a looping video"
+const val WAN_LONG_TIME = "49 frames, a 3-second video"
+const val WAN_GPU_TIME = "49 frames, a 3-second video, on the graphics chip"
+const val MOSS_GPU_TIME = "8 steps on the graphics chip"
+const val FIBO_GPU_TIME = "edits only · 4 steps on the graphics chip"
 
 /**
  * The clip length the phone's Wan files make: on the graphics chip always 49 frames; on the AI chip frames.txt says 49
@@ -718,7 +719,7 @@ fun Create(
                     Text("Size", fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     PillChoices(SIZE_TIERS.map { it.first }, s.tier, enabled = !s.busy) { s.tier = it; onSize() }
                 }
-                Note("$pw×$ph · $time")
+                Note(listOf("$pw×$ph", time).filter { it.isNotEmpty() }.joinToString(" · "))
             }
             HorizontalDivider(color = p.divider)
             PaperRow(Modifier.clickable { s.advanced = !s.advanced }, divider = s.advanced) {

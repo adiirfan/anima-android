@@ -110,7 +110,7 @@ object LocalLing {
             // instead of sleeping until woken wakes it far sooner: 14.8 -> 18.6 words/s on the S25 Edge (2026-10-10).
             // Costs one busy core while Ling writes. The same switch gave Fastest only ~2%, so it stays off there.
             pb.environment()["GGML_HEXAGON_OPPOLL"] = "1"
-            if (!File(expertFile(ctx).path + ".done").isFile) say("Preparing Ling for low memory (first time, about a minute)…")
+            if (!File(expertFile(ctx).path + ".done").isFile) say("Preparing Ling for low memory (first time only)…")
         }
         pb.redirectErrorStream(true)
         val started = try { pb.start() } catch (e: Exception) {

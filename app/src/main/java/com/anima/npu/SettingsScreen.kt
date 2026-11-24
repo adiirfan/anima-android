@@ -57,13 +57,12 @@ fun SettingsScreen(onSetup: () -> Unit) {
                 Icon(AppIcons.Chevron, null, tint = p.muted)
             }
 
-            // (setting, label, what it means): memory measured on the iQOO 13, 2026-10-09; Balanced and Low writing speeds
-            // on the S25 Edge, warm, after the 2026-10-10 streaming changes (were 15 and 14)
+            // (setting, label, what it means): the memory each one takes; no speeds, they differ between phones
             val choices = listOf(
-                Triple(0, "Fastest", "Ling · 4.9 GB · 31 words/s"),
-                Triple(48, "Balanced", "Ling · 2.6 GB · 21 words/s"),
-                Triple(32, "Low", "Ling · 2.3 GB · 19 words/s"),
-                Triple(LocalLing.SMALL, "Lowest", "Qwen3.5 0.8B · 1.4 GB · 25 words/s · less clever"),
+                Triple(0, "Fastest", "Ling · 4.9 GB"),
+                Triple(48, "Balanced", "Ling · 2.6 GB"),
+                Triple(32, "Low", "Ling · 2.3 GB"),
+                Triple(LocalLing.SMALL, "Lowest", "Qwen3.5 0.8B · 1.4 GB · less clever"),
             )
             var slots by remember { mutableIntStateOf(LocalLing.expertSlots(ctx)) }
             Block {
@@ -84,7 +83,7 @@ fun SettingsScreen(onSetup: () -> Unit) {
                 Note(when (engine) {
                     1 -> "OpenCL draws every model on the graphics chip."
                     2 -> "Vulkan draws ${GpuEngine.VULKAN_MODELS}; other models use OpenCL. If Vulkan fails on this phone, OpenCL takes over."
-                    else -> "Vulkan draws ${GpuEngine.VULKAN_MODELS} on the Snapdragon 8 Elite Gen 5, about 1.5× faster; everything else uses OpenCL."
+                    else -> "Vulkan draws ${GpuEngine.VULKAN_MODELS} on the Snapdragon 8 Elite Gen 5, where it is faster; everything else uses OpenCL."
                 })
             }
         }
