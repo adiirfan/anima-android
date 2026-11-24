@@ -12,6 +12,7 @@ phones get a "Device not supported" page.
 |---|---|---|
 | **Anima Turbo** | Anime pictures in six sizes, with an optional guide picture and a 4× upscaler | about 6–17 s |
 | **FLUX.2 [klein] 4B** | Pictures from plain sentences, and picture editing | about 8 s; edits about 20 s |
+| **Krea 2 Turbo** (8 steps) | 768×768 pictures from text | not timed on these phones yet |
 | **Qwen-Image 2.1 Turbo** (8 steps) | 768×768 pictures, and picture editing | about 2½ min; edits about 5 min |
 | **Fibo 2.0** | Picture editing only | about 75 s |
 | **MOSS-Image** (8-step version) | Pictures | about 1¾ min |
@@ -39,6 +40,7 @@ phone. Every picture model also has a graphics-chip build, offered next to the n
 |---|---|---|---|
 | Anima Turbo | [anima-qnn-8elite](https://huggingface.co/sebekblessing/anima-qnn-8elite) | [anima-qnn-8elite-gen5](https://huggingface.co/sebekblessing/anima-qnn-8elite-gen5) | [anima-gpu](https://huggingface.co/sebekblessing/anima-gpu) |
 | FLUX.2 [klein] 4B | [klein-4b-qnn-8elite](https://huggingface.co/sebekblessing/klein-4b-qnn-8elite) | [klein-4b-qnn-8elite-gen5](https://huggingface.co/sebekblessing/klein-4b-qnn-8elite-gen5) (768×768, square only) | [klein-4b-gpu](https://huggingface.co/sebekblessing/klein-4b-gpu) |
+| Krea 2 Turbo | [krea-2-turbo-qnn-8elite](https://huggingface.co/sebekblessing/krea-2-turbo-qnn-8elite) (not yet tried on a phone) | [krea-2-turbo-qnn-8elite-gen5](https://huggingface.co/sebekblessing/krea-2-turbo-qnn-8elite-gen5) | [krea-2-turbo-gpu](https://huggingface.co/sebekblessing/krea-2-turbo-gpu) |
 | Qwen-Image 2.1 | [qwen-image-2.1-qnn-8elite](https://huggingface.co/sebekblessing/qwen-image-2.1-qnn-8elite) | [qwen-image-2.1-qnn-8elite-gen5](https://huggingface.co/sebekblessing/qwen-image-2.1-qnn-8elite-gen5) | [qwen-image-2.1-gpu](https://huggingface.co/sebekblessing/qwen-image-2.1-gpu) (pictures only, no edits) |
 | Fibo 2.0 | [fibo-qnn-8elite](https://huggingface.co/sebekblessing/fibo-qnn-8elite) | [fibo-qnn-8elite-gen5](https://huggingface.co/sebekblessing/fibo-qnn-8elite-gen5) | [fibo-gpu](https://huggingface.co/sebekblessing/fibo-gpu) |
 | MOSS-Image | [moss-qnn-8elite](https://huggingface.co/sebekblessing/moss-qnn-8elite) | [moss-qnn-8elite-gen5](https://huggingface.co/sebekblessing/moss-qnn-8elite-gen5) | [moss-gpu](https://huggingface.co/sebekblessing/moss-gpu) |
@@ -54,6 +56,7 @@ guide in its `build/` folder.
 
 - Anima, Qwen-Image and Fibo: **non-commercial use only**.
 - FLUX.2 [klein] 4B, MOSS-Image and Wan 2.2: Apache 2.0 (the Wan Turbo version's page names no licence).
+- Krea 2 Turbo: the Krea 2 Community License, by Krea.
 - Ling-3.0-tiny: MIT, by inclusionAI.
 
 Each model repo has its licence and notice files.
