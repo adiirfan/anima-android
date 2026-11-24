@@ -11,6 +11,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.NavigationRailItemDefaults
@@ -360,6 +361,7 @@ class MainActivity : ComponentActivity() {
                 var tab by remember { mutableIntStateOf(0) }
                 var open by remember { mutableStateOf<Gallery.Entry?>(null) }
                 var showQueue by remember { mutableStateOf(false) }
+                var galleryRefresh by remember { mutableIntStateOf(0) }   // reloads the grid after the side panel changed a picture
                 LaunchedEffect(openUri.value) {
                     val uri = openUri.value ?: return@LaunchedEffect
                     openUri.value = null
@@ -404,6 +406,11 @@ class MainActivity : ComponentActivity() {
                         item("Gallery", AppIcons.Gallery, here && tab == 2) { go(2) }
                         item("Queue", AppIcons.Queue, showQueue, badge = waiting) { go(0); showQueue = true }
                         item("Settings", AppIcons.Settings, here && tab == 3) { go(3) }
+                }
+                val useEntry: (Gallery.Entry) -> Unit = { e ->
+                    create.prompt = e.prompt; create.seed = e.seed; if (create.model == "anima") create.steps = e.steps
+                    sizeIndex(e.width, e.height)?.let { (t, k) -> create.tier = t; create.shape = k }
+                    open = null; tab = 0
                 }
                 val body: @Composable () -> Unit = {
                 Scaffold(
@@ -450,11 +457,8 @@ class MainActivity : ComponentActivity() {
                                 ) }
                             }
                             showQueue && open == null -> Readable { QueueScreen(onOpen = { open = it }, onBack = { showQueue = false }) }
-                            open != null -> Detail(open!!, onBack = { open = null }, onUse = { e ->
-                                create.prompt = e.prompt; create.seed = e.seed; if (create.model == "anima") create.steps = e.steps
-                                sizeIndex(e.width, e.height)?.let { (t, k) -> create.tier = t; create.shape = k }
-                                open = null; tab = 0
-                            })
+                            // unfolded, a picture opened from the gallery shows in a panel beside the grid (below)
+                            open != null && !(isWide() && tab == 2 && !showQueue) -> Detail(open!!, onBack = { open = null; galleryRefresh++ }, onUse = useEntry)
                             tab == 0 -> Column {
                                 ChatBar(openMenu, "Create")
                                 val st = ModelStore.byId(create.model)
@@ -480,7 +484,12 @@ class MainActivity : ComponentActivity() {
                             tab == 1 -> Box(Modifier.fillMaxSize()) { ChatScreen(Chat.get(ctx), isInstalled = { installedOf[it] != null },
                                 onDownload = { downloadFor = LocalLing.store(ctx).id }, onOpen = { open = it }, onMenu = openMenu) }
                             tab == 3 -> Readable { Column { ChatBar(openMenu, "Settings"); SettingsScreen(onSetup = { showSetup = true }) } }
-                            else -> GalleryGrid(openMenu, onOpen = { open = it })
+                            else -> if (isWide() && open != null) Row(Modifier.fillMaxSize()) {
+                                Box(Modifier.weight(1f)) { GalleryGrid(openMenu, onOpen = { open = it }, selected = open, refresh = galleryRefresh) }
+                                Box(Modifier.width(300.dp).fillMaxHeight()) {
+                                    Detail(open!!, onBack = { open = null; galleryRefresh++ }, onUse = useEntry, panel = true)
+                                }
+                            } else GalleryGrid(openMenu, onOpen = { open = it }, refresh = galleryRefresh)
                         }
                     }
                 }
@@ -797,7 +806,7 @@ fun Create(
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
+fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit, selected: Gallery.Entry? = null, refresh: Int = 0) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf<List<Gallery.Entry>>(emptyList()) }
@@ -806,7 +815,7 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
     var choosing by remember { mutableStateOf(false) }
     var asking by remember { mutableStateOf(false) }
     var clips by remember { mutableStateOf<Set<String>>(emptySet()) }   // which pictures are GIFs or videos
-    LaunchedEffect(Unit) {
+    LaunchedEffect(refresh) {
         withContext(Dispatchers.IO) {
             val all = Gallery.list(ctx)
             clips = all.filter { Gallery.isClip(ctx, it) }.map { it.uri.toString() }.toSet()
@@ -866,7 +875,9 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
                 val key = e.uri.toString()
                 val on = key in chosen
                 fun toggle() { chosen = if (on) chosen - key else chosen + key }
-                Box(Modifier.padding(3.dp).aspectRatio(1f).clip(RoundedCornerShape(12.dp)).background(LocalPaper.current.card).combinedClickable(
+                Box(Modifier.padding(3.dp).aspectRatio(1f)
+                    .then(if (selected?.uri == e.uri) Modifier.border(2.dp, LocalPaper.current.accent, RoundedCornerShape(12.dp)).padding(4.dp) else Modifier)
+                    .clip(RoundedCornerShape(if (selected?.uri == e.uri) 9.dp else 12.dp)).background(LocalPaper.current.card).combinedClickable(
                     onClick = { if (choosing) toggle() else onOpen(e) },
                     onLongClick = { if (!choosing) { choosing = true; chosen = setOf(key) } else toggle() })) {
                     thumb?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize().padding(if (on) 10.dp else 0.dp)
@@ -894,7 +905,7 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
 private var galleryFilter by mutableStateOf(GalleryFilter.ALL)
 
 @Composable
-fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit) {
+fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit, panel: Boolean = false) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var e by remember(e0) { mutableStateOf(e0) }   // replaced by the upscaled picture's entry after Upscale
@@ -910,14 +921,14 @@ fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit
             if (gif) GifPlayer(e.uri, m) else Image(it.asImageBitmap(), null, m)
         }
     }
-    val wide = isWide()
+    val wide = isWide() && !panel   // as a side panel: one column, the picture on top
     Row(Modifier.fillMaxSize()) {
     if (wide) Column(Modifier.weight(1.3f).verticalScroll(rememberScrollState()).padding(16.dp)) {
         TextButton(onClick = onBack) { Text("‹ Back") }
         picture()
     }
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (!wide) { TextButton(onClick = onBack) { Text("‹ Back") }; picture() } else Spacer(Modifier.height(40.dp))
+        if (!wide) { TextButton(onClick = onBack) { Text(if (panel) "Close" else "‹ Back") }; picture() } else Spacer(Modifier.height(40.dp))
         Text(e.prompt)
         Text("seed ${e.seed} · ${e.steps} steps · ${e.width}×${e.height}", style = MaterialTheme.typography.bodySmall)
         // wraps onto a second line when the column is too narrow for all three (the unfolded side panel)
