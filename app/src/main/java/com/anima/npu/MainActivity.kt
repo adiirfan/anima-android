@@ -11,6 +11,11 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.draw.rotate
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.material3.NavigationDrawerItemDefaults
@@ -106,6 +111,7 @@ import kotlin.random.Random
 
 /** What the Create screen keeps across tab switches. */
 class CreateState {
+    var advanced by mutableStateOf(false)   // "Steps, seed and memory" opened on Create
     // Pictures run here rather than in the Create screen's own scope, which is cancelled when the screen is left
     // (Gallery tab, a picture's details): the drawing finished but its result was dropped and the screen stayed busy.
     val work = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -460,7 +466,9 @@ class MainActivity : ComponentActivity() {
                             // unfolded, a picture opened from the gallery shows in a panel beside the grid (below)
                             open != null && !(isWide() && tab == 2 && !showQueue) -> Detail(open!!, onBack = { open = null; galleryRefresh++ }, onUse = useEntry)
                             tab == 0 -> Column {
-                                ChatBar(openMenu, "Create")
+                                val qTick by Queue.store.changed.collectAsState()
+                                val waitingNow = remember(qTick) { Queue.store.waitingCount() }
+                                ChatBar(openMenu, "Create") { QueueChip(waitingNow, Modifier.padding(end = 12.dp)) { showQueue = true } }
                                 val st = ModelStore.byId(create.model)
                                 val inst = installedOf[st.id]
                                 Create(create, Engines::ensureAnima, Engines::ensureKlein, { Engines.ensureQwen(create.qwenDrawing) },
@@ -475,7 +483,7 @@ class MainActivity : ComponentActivity() {
                                         prefs.edit().putString("model", id).putString("qwenDrawing", create.qwenDrawing).apply()
                                     },
                                     onSize = { prefs.edit().putInt("tier", create.tier).putInt("shape", create.shape).apply() },
-                                    onQueue = { showQueue = true }) { m ->
+                                    onQueue = { showQueue = true }, onOpen = { open = it }, onSeeAll = { go(2) }) { m ->
                                     create.memoryMode = m
                                     prefs.edit().putInt("memoryMode", m).apply()
                                     Engines.setMemoryMode(m)
@@ -559,7 +567,7 @@ fun Create(
     modelLabel: String,
     installed: Boolean, animaInstalled: Boolean, onChangeModel: () -> Unit, onDownload: () -> Unit,
     updateBytes: Long, onUpdate: () -> Unit, onModel: (String, String?) -> Unit, onSize: () -> Unit,
-    onQueue: () -> Unit, onMemoryMode: (Int) -> Unit,
+    onQueue: () -> Unit, onOpen: (Gallery.Entry) -> Unit = {}, onSeeAll: () -> Unit = {}, onMemoryMode: (Int) -> Unit,
 ) {
     val ctx = LocalContext.current
     val scope = s.work  // outlives this screen: a tab switch must not drop a picture being drawn
@@ -601,117 +609,163 @@ fun Create(
             )   // every model is listed; one with nothing for this phone is shown as unavailable
         }
         var menu by remember { mutableStateOf(false) }
-        Box {
-            Pill((choices.firstOrNull { it.first == s.model && (it.second == null || it.second == s.qwenDrawing) }?.third ?: s.model) + "  ▾",
-                enabled = !s.busy) { menu = true }
-            DropdownMenu(menu, { menu = false }) {
-                choices.forEach { (id, drawing, name) ->
-                    val st = ModelStore.byId(id)
-                    val have = st.active(ctx).installed(ctx) != null   // the version this phone uses (AI chip or graphics chip)
-                    DropdownMenuItem(text = { Text(when { !st.offered -> "$name · unavailable on this phone"; have -> name; else -> "$name · not downloaded" }) },
-                        enabled = st.offered, onClick = { menu = false; onModel(id, drawing) })
+        val p = LocalPaper.current
+        val modelPicker: @Composable () -> Unit = {
+            Box {
+                Pill((choices.firstOrNull { it.first == s.model && (it.second == null || it.second == s.qwenDrawing) }?.third ?: s.model) + "  ▾",
+                    enabled = !s.busy) { menu = true }
+                DropdownMenu(menu, { menu = false }) {
+                    choices.forEach { (id, drawing, name) ->
+                        val st = ModelStore.byId(id)
+                        val have = st.active(ctx).installed(ctx) != null   // the version this phone uses (AI chip or graphics chip)
+                        DropdownMenuItem(text = { Text(when { !st.offered -> "$name · unavailable on this phone"; have -> name; else -> "$name · not downloaded" }) },
+                            enabled = st.offered, onClick = { menu = false; onModel(id, drawing) })
+                    }
                 }
             }
         }
+        @Composable fun Note(text: String, color: Color = p.muted) = Text(text, style = MaterialTheme.typography.bodySmall, color = color)
         if (!installed) {
-            Text("${ModelStore.byId(s.model).title} is not downloaded yet." + when {
-                klein -> " It draws from plain sentences and can edit your pictures (about 4 GB)."
-                qwen -> " It draws 768×768 pictures from plain sentences and can edit your pictures (about 15 GB)."
-                fibo -> " It changes your pictures as you describe, at 768×768 (about 15 GB). It only edits."
-                moss -> " It draws 768×768 pictures from plain sentences in 8 steps (about ${if (ModelStore.MOSS.runsOnGpu(ctx)) 11 else 16} GB). It does not edit."
-                wan -> " It turns one of your pictures into a short looping video that moves as you describe."
-                else -> ""
-            })
-            val dl = ModelStore.byId(s.model).active(ctx).id
-            val task = Installer.task(dl)
-            BigButton("Download…", enabled = !Installer.isRunning(dl), modifier = Modifier.fillMaxWidth(), onClick = onDownload)
-            if (task != null && task.running) {
-                Text("Downloading: ${task.status}", style = MaterialTheme.typography.bodySmall)
-                LinearProgressIndicator(progress = { task.fraction }, modifier = Modifier.fillMaxWidth())
+            PaperCard(Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Model", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)); modelPicker()
+                    }
+                    Text("${ModelStore.byId(s.model).title} is not downloaded yet." + when {
+                        klein -> " It draws from plain sentences and can edit your pictures (about 4 GB)."
+                        qwen -> " It draws 768×768 pictures from plain sentences and can edit your pictures (about 15 GB)."
+                        fibo -> " It changes your pictures as you describe, at 768×768 (about 15 GB). It only edits."
+                        moss -> " It draws 768×768 pictures from plain sentences in 8 steps (about ${if (ModelStore.MOSS.runsOnGpu(ctx)) 11 else 16} GB). It does not edit."
+                        wan -> " It turns one of your pictures into a short looping video that moves as you describe."
+                        else -> ""
+                    })
+                    val dl = ModelStore.byId(s.model).active(ctx).id
+                    val task = Installer.task(dl)
+                    BigButton("Download…", enabled = !Installer.isRunning(dl), modifier = Modifier.fillMaxWidth(), onClick = onDownload)
+                    if (task != null && task.running) {
+                        Note("Downloading: ${task.status}")
+                        LinearProgressIndicator(progress = { task.fraction }, modifier = Modifier.fillMaxWidth())
+                    }
+                }
             }
             return@controls
         }
-        OutlinedTextField(s.prompt, { s.prompt = it }, Modifier.fillMaxWidth(),
-            label = { Text(if (wan) "How the picture moves" else if (fibo || !anima && !moss && !qwenSmall && s.edit != null) "What to change" else "Prompt") }, minLines = 3, enabled = !s.busy)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                s.seed.toString(), { v -> v.toLongOrNull()?.let { s.seed = it; s.seedLocked = true } }, Modifier.width(170.dp),
-                label = { Text("Seed") }, singleLine = true, enabled = !s.busy,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            )
-            Pill("New seed", enabled = !s.busy) { s.seed = Random.nextLong(0, 1_000_000_000); s.seedLocked = false }
+        val fiboNeedsPicture = (fibo || wan) && s.edit == null
+
+        // the prompt card: what to draw, with which model, and any picture to edit or follow
+        PaperCard(Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (wan) "How the picture moves" else if (fibo || !anima && !moss && !qwenSmall && s.edit != null) "What to change" else "Prompt",
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    modelPicker()
+                }
+                BasicTextField(s.prompt, { s.prompt = it }, Modifier.fillMaxWidth().heightIn(min = 96.dp), enabled = !s.busy,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 17.sp, lineHeight = 26.sp, color = p.text, fontFamily = PaperFont),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(p.accent))
+                if (qwenSmall) Note("Editing pictures needs the Standard Qwen download (Model: Change).")
+                if (fiboNeedsPicture) Note(if (wan) "Choose the picture to bring to life below." else "Fibo only edits: choose a picture to edit below.")
+                if (!anima && !qwenSmall && !moss) {   // MOSS only draws new pictures
+                    Note(if (wan) "Picture to animate: it becomes the first frame" else if (fibo) "Picture to edit: Fibo changes it as you describe"
+                        else "Picture to edit (optional): ${if (klein) "Klein" else "Qwen"} changes it as you describe")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        s.edit?.let { Image(it.asImageBitmap(), null, Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop) }
+                        DashedButton(if (s.edit == null) "Choose picture" else "Change", AppIcons.Gallery, enabled = !s.busy) {
+                            pickEdit.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+                        if (s.edit != null) TextButton(onClick = { s.edit = null }, enabled = !s.busy) { Text("Remove", maxLines = 1) }
+                    }
+                    if (s.edit != null) Note((if (big) "It is cropped to a square." else "It is cropped to the shape below.") +
+                        if (wan) " Describe the movement, e.g. \"she waves and laughs\"." else " Describe the change, e.g. \"make her hair red\".")
+                }
+                if (anima) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        s.guide?.let { Image(it.asImageBitmap(), null, Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop) }
+                        DashedButton(if (s.guide == null) "Guide picture" else "Change", AppIcons.Gallery, enabled = !s.busy) {
+                            pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+                        if (s.guide != null) TextButton(onClick = { s.guide = null }, enabled = !s.busy) { Text("Remove", maxLines = 1) }
+                    }
+                    if (s.guide == null) Note("Optional: the layout and pose follow it, the prompt decides the rest.")
+                    else {
+                        Note("How closely to follow it: %.1f".format(s.guideStrength))
+                        Slider(s.guideStrength, { s.guideStrength = (it * 10).toInt() / 10f }, valueRange = 0.2f..1.5f, enabled = !s.busy)
+                        Note("For how much of the drawing: %d%%".format((s.guideEnd * 100).toInt()))
+                        Slider(s.guideEnd, { s.guideEnd = (it * 20).toInt() / 20f }, valueRange = 0.2f..1f, enabled = !s.busy)
+                        Note("Less of the drawing keeps the pose but lets the prompt change clothes and details.")
+                    }
+                }
+            }
         }
-        if (anima) {
-            Text("Steps (fewer is faster, 8 is the full quality)")
-            PillChoices(listOf("4", "6", "8"), listOf(4, 6, 8).indexOf(s.steps), enabled = !s.busy) { s.steps = listOf(4, 6, 8)[it] }
-        }
-        if (!big) Text("Size")
-        if (anima) PillChoices(SIZE_TIERS.map { it.first }, s.tier, enabled = !s.busy) { s.tier = it; onSize() }
-        // Klein's 8 Elite Gen 5 AI-chip build is square only: the other shapes stay on show, greyed out
-        val squareOnly = klein && kleinSquareOnly(ctx)
+
+        // the settings card: shape and size up front, the rarely changed ones behind one row
+        val squareOnly = klein && kleinSquareOnly(ctx)   // Klein's 8 Elite Gen 5 AI-chip build: other shapes greyed out
         val shapeUsed = if (squareOnly) 0 else s.shape
-        if (!big) PillChoices(SHAPES, shapeUsed, enabled = !s.busy, enabledAt = { !squareOnly || it == 0 }) { s.shape = it; onSize() }
-        if (squareOnly) Text("Tall and wide are not built for this phone's AI chip yet. The graphics chip draws them.",
-            style = MaterialTheme.typography.bodySmall)
         val (pw, ph) = if (big) 768 to 768 else pictureSize(if (klein) kleinTier(ctx) else s.tier, shapeUsed)
-        Text("$pw×$ph · " + when { klein -> if (GpuEngine.useForKlein(ctx)) KLEIN_GPU_TIME else if (Chip.kind == Chip.Kind.ELITE_GEN5) KLEIN_GEN5_TIME else KLEIN_TIME
+        val time = when { klein -> if (GpuEngine.useForKlein(ctx)) KLEIN_GPU_TIME else if (Chip.kind == Chip.Kind.ELITE_GEN5) KLEIN_GEN5_TIME else KLEIN_TIME
             fibo -> if (GpuEngine.useForFibo(ctx)) FIBO_GPU_TIME else FIBO_TIME
             moss -> if (GpuEngine.useForMoss(ctx)) MOSS_GPU_TIME else MOSS_TIME
             wan -> wanTime(ctx)
-            qwen -> if (s.qwenDrawing == "noctq") NOCTQ_TIME else QWEN_TIME; else -> SIZE_TIERS[s.tier].second },
-            style = MaterialTheme.typography.bodySmall)
-        if (qwenSmall) Text("Editing pictures needs the Standard Qwen download (Model: Change).", style = MaterialTheme.typography.bodySmall)
-        val fiboNeedsPicture = (fibo || wan) && s.edit == null
-        if (fiboNeedsPicture) Text(if (wan) "Choose the picture to bring to life below." else "Fibo only edits: choose a picture to edit below.",
-            style = MaterialTheme.typography.bodySmall)
-        if (!anima && !qwenSmall && !moss) {   // MOSS only draws new pictures
-            Text(if (wan) "Picture to animate: it becomes the first frame" else if (fibo) "Picture to edit: Fibo changes it as you describe"
-                else "Picture to edit (optional): ${if (klein) "Klein" else "Qwen"} changes it as you describe")
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                s.edit?.let { Image(it.asImageBitmap(), null, Modifier.size(72.dp), contentScale = ContentScale.Crop) }
-                Pill(if (s.edit == null) "Choose…" else "Change", enabled = !s.busy) {
-                    pickEdit.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-                if (s.edit != null) TextButton(onClick = { s.edit = null }, enabled = !s.busy) { Text("Remove") }
-            }
-            if (s.edit != null) Text((if (big) "It is cropped to a square." else "It is cropped to the shape above.") +
-                if (wan) " Describe the movement, e.g. \"she waves and laughs\"." else " Describe the change, e.g. \"make her hair red\".",
-                style = MaterialTheme.typography.bodySmall)
-        }
-        if (anima) Text("Guide picture (optional): the layout and pose follow it, the prompt decides the rest")
-        if (anima) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            s.guide?.let { Image(it.asImageBitmap(), null, Modifier.size(72.dp), contentScale = ContentScale.Crop) }
-            Pill(if (s.guide == null) "Choose…" else "Change", enabled = !s.busy) {
-                pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-            if (s.guide != null) TextButton(onClick = { s.guide = null }, enabled = !s.busy) { Text("Remove") }
-        }
-        if (anima && s.guide != null) {
-            Text("How closely to follow it: %.1f".format(s.guideStrength), style = MaterialTheme.typography.bodySmall)
-            Slider(s.guideStrength, { s.guideStrength = (it * 10).toInt() / 10f }, valueRange = 0.2f..1.5f, enabled = !s.busy)
-            Text("For how much of the drawing: %d%%".format((s.guideEnd * 100).toInt()), style = MaterialTheme.typography.bodySmall)
-            Slider(s.guideEnd, { s.guideEnd = (it * 20).toInt() / 20f }, valueRange = 0.2f..1f, enabled = !s.busy)
-            Text("Less of the drawing keeps the pose but lets the prompt change clothes and details.",
-                style = MaterialTheme.typography.bodySmall)
-        }
-        if (!big) Text("Memory use")
-        if (!big) PillChoices(MEMORY_MODES.map { it.first }, s.memoryMode, enabled = !s.busy) { onMemoryMode(it) }
-        if (!big) Text(MEMORY_MODES[s.memoryMode].second, style = MaterialTheme.typography.bodySmall)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Model: $modelLabel", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-            TextButton(onClick = onChangeModel, enabled = !s.busy) { Text("Change") }
-        }
+            qwen -> if (s.qwenDrawing == "noctq") NOCTQ_TIME else QWEN_TIME; else -> SIZE_TIERS[s.tier].second }
         val myTask = Installer.task(ModelStore.byId(s.model).active(ctx).id)?.takeIf { it.running }
+        PaperCard(Modifier.fillMaxWidth(), padding = PaddingValues(horizontal = 16.dp)) {
+            if (!big) Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Shape", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                PillChoices(SHAPES, shapeUsed, enabled = !s.busy, enabledAt = { !squareOnly || it == 0 }) { s.shape = it; onSize() }
+                if (squareOnly) Note("Tall and wide are not built for this phone's AI chip yet. The graphics chip draws them.")
+            }
+            if (!big) HorizontalDivider(color = p.divider)
+            Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (anima) {
+                    Text("Size", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    PillChoices(SIZE_TIERS.map { it.first }, s.tier, enabled = !s.busy) { s.tier = it; onSize() }
+                }
+                Note("$pw×$ph · $time")
+            }
+            HorizontalDivider(color = p.divider)
+            PaperRow(Modifier.clickable { s.advanced = !s.advanced }, divider = s.advanced) {
+                Text("Steps, seed and memory", Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(if (anima) "${s.steps} steps" else "seed ${s.seed}", fontSize = 13.sp, color = p.muted, maxLines = 1)
+                Icon(AppIcons.Chevron, null, Modifier.rotate(if (s.advanced) 90f else 0f), tint = p.muted)
+            }
+            if (s.advanced) Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        s.seed.toString(), { v -> v.toLongOrNull()?.let { s.seed = it; s.seedLocked = true } }, Modifier.width(170.dp),
+                        label = { Text("Seed") }, singleLine = true, enabled = !s.busy,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    Pill("New seed", enabled = !s.busy) { s.seed = Random.nextLong(0, 1_000_000_000); s.seedLocked = false }
+                }
+                if (anima) {
+                    Text("Steps (fewer is faster, 8 is the full quality)", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    PillChoices(listOf("4", "6", "8"), listOf(4, 6, 8).indexOf(s.steps), enabled = !s.busy) { s.steps = listOf(4, 6, 8)[it] }
+                }
+                if (!big) {
+                    Text("Memory use", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    PillChoices(MEMORY_MODES.map { it.first }, s.memoryMode, enabled = !s.busy) { onMemoryMode(it) }
+                    Note(MEMORY_MODES[s.memoryMode].second)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Note("Model: $modelLabel", ); Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onChangeModel, enabled = !s.busy) { Text("Change") }
+                }
+            }
+        }
         if (myTask != null) {
-            Text("Updating the model: ${myTask.status}", style = MaterialTheme.typography.bodySmall)
+            Note("Updating the model: ${myTask.status}")
             LinearProgressIndicator(progress = { myTask.fraction }, modifier = Modifier.fillMaxWidth())
         } else if (updateBytes > 0) Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Model update available (%.1f GB)".format(updateBytes / 1e9), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             TextButton(onClick = onUpdate, enabled = !s.busy) { Text("Update") }
         }
-        // one tap, one job: the button turns into a spinner until the job is in the queue, so a second tap
-        // (or a double tap) cannot add it twice
+    }
+    // Draw: one tap, one job. The button shows a spinner until the job is in the queue, so a second tap (or a
+    // double tap) cannot add it twice.
+    val drawButton: @Composable () -> Unit = {
+        val myTask = Installer.task(ModelStore.byId(s.model).active(ctx).id)?.takeIf { it.running }
+        val fiboNeedsPicture = (fibo || wan) && s.edit == null
         var adding by remember { mutableStateOf(false) }
         val addScope = rememberCoroutineScope()
-        BigButton(if (adding) "Adding…" else if (myTask != null) "Add to queue (after the update)" else "Add to queue",
+        BigButton(if (adding) "Adding…" else if (myTask != null) "Draw (after the update)" else "Draw",
             icon = AppIcons.Brush, busy = adding,
             enabled = !adding && myTask == null && s.prompt.isNotBlank() && installed && !fiboNeedsPicture,
             modifier = Modifier.fillMaxWidth(), onClick = {
@@ -734,6 +788,7 @@ fun Create(
     }
     val result: @Composable ColumnScope.() -> Unit = {
         // the newest finished picture from this screen, and how the queue is doing
+        val p = LocalPaper.current
         val tick by Queue.store.changed.collectAsState()
         val progress by QueueService.progress.collectAsState()
         val queueLine = remember(tick, progress) {
@@ -753,50 +808,90 @@ fun Create(
             s.status = "Done in %.0f s · saved to the gallery".format(j.ms / 1000.0)
         }
         if (queueLine.isNotEmpty()) TextButton(onClick = onQueue) { Text(queueLine, style = MaterialTheme.typography.bodySmall) }
-        if (s.status.isNotEmpty()) Text(s.status, style = MaterialTheme.typography.bodySmall)
-        s.picture?.let { bmp ->
-            val clip = s.clipUri
-            if (clip != null) GifPlayer(clip, Modifier.fillMaxWidth().aspectRatio(bmp.width.toFloat() / bmp.height))
-            else Image(bmp.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(bmp.width.toFloat() / bmp.height))
-            if (clip == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill(if (s.savedFor === bmp) "Saved" else "Save", enabled = !s.busy && s.savedFor !== bmp) {
-                    scope.launch(Dispatchers.IO) {
-                        Gallery.save(ctx, bmp, s.prompt, s.seed, if (anima) s.steps else 4, s.pictureMs)
-                        s.savedFor = bmp
-                        s.status = "Saved to Pictures/Anima (${bmp.width}×${bmp.height})"
-                    }
-                }
-                if (bmp.width == s.genW && animaInstalled) Pill("Upscale 4×", enabled = !s.busy && !Installer.isRunning("anima")) {
-                    s.busy = true
-                    scope.launch {
-                        val w = bmp.width
-                        val h = bmp.height
-                        val px = IntArray(w * h).also { bmp.getPixels(it, 0, w, 0, 0, w, h) }
-                        val up = withContext(Dispatchers.Default) { ensureEngine(); Engine.upscale(px, w, h) }
-                        if (up == null) s.status = Engine.lastError() else {
-                            s.picture = Bitmap.createBitmap(up, 4 * w, 4 * h, Bitmap.Config.ARGB_8888)
-                            s.status = "Upscaled to %d×%d in %.2f s".format(4 * w, 4 * h, Engine.lastTimes()[3] / 1000)
+        val bmp = s.picture
+        if (bmp == null) { if (s.status.isNotEmpty()) Text(s.status, style = MaterialTheme.typography.bodySmall, color = p.muted) }
+        else PaperCard(Modifier.fillMaxWidth(), padding = PaddingValues(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val clip = s.clipUri
+                val m = Modifier.fillMaxWidth().aspectRatio(bmp.width.toFloat() / bmp.height).clip(RoundedCornerShape(14.dp))
+                if (clip != null) GifPlayer(clip, m) else Image(bmp.asImageBitmap(), null, m)
+                if (s.status.isNotEmpty()) Text(s.status, Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = p.muted)
+                if (clip == null) Row(Modifier.padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill(if (s.savedFor === bmp) "Saved" else "Save", enabled = !s.busy && s.savedFor !== bmp) {
+                        scope.launch(Dispatchers.IO) {
+                            Gallery.save(ctx, bmp, s.prompt, s.seed, if (anima) s.steps else 4, s.pictureMs)
+                            s.savedFor = bmp
+                            s.status = "Saved to Pictures/Anima (${bmp.width}×${bmp.height})"
                         }
-                        s.busy = false
                     }
+                    if (bmp.width == s.genW && animaInstalled) Pill("Upscale 4×", enabled = !s.busy && !Installer.isRunning("anima")) {
+                        s.busy = true
+                        scope.launch {
+                            val w = bmp.width
+                            val h = bmp.height
+                            val px = IntArray(w * h).also { bmp.getPixels(it, 0, w, 0, 0, w, h) }
+                            val up = withContext(Dispatchers.Default) { ensureEngine(); Engine.upscale(px, w, h) }
+                            if (up == null) s.status = Engine.lastError() else {
+                                s.picture = Bitmap.createBitmap(up, 4 * w, 4 * h, Bitmap.Config.ARGB_8888)
+                                s.status = "Upscaled to %d×%d in %.2f s".format(4 * w, 4 * h, Engine.lastTimes()[3] / 1000)
+                            }
+                            s.busy = false
+                        }
+                    }
+                    // the finished picture as the next drawing's guide: the bitmap already in memory, no file written
+                    if (anima) Pill("Use as guide", enabled = !s.busy && s.guide !== bmp) { s.guide = bmp; s.status = "Set as the guide picture" }
                 }
             }
         }
     }
     if (isWide()) Row(Modifier.fillMaxSize()) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            controls(); Spacer(Modifier.height(24.dp))
+        Column(Modifier.width(300.dp).fillMaxHeight().padding(start = 16.dp, top = 8.dp, bottom = 16.dp)) {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                controls(); Spacer(Modifier.height(8.dp))
+            }
+            if (installed) { Spacer(Modifier.height(12.dp)); drawButton() }
         }
-        Column(Modifier.weight(1.15f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (installed) result()
             if (s.picture == null) Text("The finished picture shows here.", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            RecentStrip(5, onOpen, onSeeAll)
             Spacer(Modifier.height(24.dp))
         }
-    } else Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    } else Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         controls()
+        RecentStrip(4, onOpen, onSeeAll)
+        if (installed) drawButton()
         if (installed) result()
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** The newest pictures, [columns] across, with "See all" for the gallery. Reloads when the queue finishes one. */
+@Composable
+private fun RecentStrip(columns: Int, onOpen: (Gallery.Entry) -> Unit, onSeeAll: () -> Unit) {
+    val ctx = LocalContext.current
+    val p = LocalPaper.current
+    val tick by Queue.store.changed.collectAsState()
+    val recent by produceState(emptyList<Pair<Gallery.Entry, Bitmap?>>(), tick, columns) {
+        value = withContext(Dispatchers.IO) { Gallery.list(ctx).take(columns).map { it to Gallery.thumbnail(ctx, it, 256) } }
+    }
+    if (recent.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Recent", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text("See all", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = p.link,
+                modifier = Modifier.clickable(onClick = onSeeAll).padding(4.dp))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (i in 0 until columns) {
+                val item = recent.getOrNull(i)
+                Box(Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(14.dp)).background(if (item == null) Color.Transparent else p.card)
+                    .then(if (item != null) Modifier.clickable { onOpen(item.first) } else Modifier)) {
+                    item?.second?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                }
+            }
+        }
     }
 }
 

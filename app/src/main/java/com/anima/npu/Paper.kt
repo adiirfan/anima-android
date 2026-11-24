@@ -33,6 +33,12 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -162,6 +168,41 @@ fun PillChoices(options: List<String>, selected: Int, enabled: Boolean = true, m
     FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         options.forEachIndexed { i, label ->
             Pill(label, selected = i == selected, enabled = enabled && enabledAt(i)) { onSelect(i) }
+        }
+    }
+}
+
+/** The quiet dashed button for an optional extra ("Guide picture"). */
+@Composable
+fun DashedButton(text: String, icon: ImageVector? = null, enabled: Boolean = true, onClick: () -> Unit) {
+    val p = LocalPaper.current
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        Modifier.heightIn(min = 36.dp).clip(shape).background(p.well)
+            .drawBehind {
+                drawRoundRect(p.dash, cornerRadius = CornerRadius(10.dp.toPx()),
+                    style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))))
+            }
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (icon != null) Icon(icon, null, Modifier.size(16.dp), tint = p.muted)
+        Text(text, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = if (enabled) p.muted else p.line)
+    }
+}
+
+/** The Queue button at the top of Create: soft blue, with how many pictures wait. */
+@Composable
+fun QueueChip(waiting: Int, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val p = LocalPaper.current
+    Surface(onClick = onClick, shape = CircleShape, color = p.soft, contentColor = p.softText, modifier = modifier.height(36.dp)) {
+        Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Queue", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            if (waiting > 0) Box(Modifier.defaultMinSize(minWidth = 20.dp).height(20.dp).clip(CircleShape).background(p.badge)
+                .padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
+                Text("$waiting", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            }
         }
     }
 }
