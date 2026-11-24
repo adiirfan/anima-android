@@ -38,7 +38,7 @@ The larger models need a lot of memory and are much slower on older phones.
 
 ## Samples
 
-Drawn on a Snapdragon 8 Elite Gen 5 phone in airplane mode, with the prompts below, and shown here smaller.
+Made on Snapdragon 8 Elite Gen 5 phones, with the prompts below, and shown here smaller.
 
 | | | |
 |---|---|---|
@@ -46,6 +46,8 @@ Drawn on a Snapdragon 8 Elite Gen 5 phone in airplane mode, with the prompts bel
 | **Anima Turbo:** masterpiece, best quality, safe, 1girl, solo, silver hair, long hair, blue eyes, smile, school uniform, cherry blossoms, falling petals, outdoors, spring, soft light | **FLUX.2 klein:** a cozy coffee shop interior with plants, warm light, people chatting, film photography | **Krea 2 Turbo:** a red fox sitting in fresh snow, morning light, photo |
 | ![Qwen-Image](samples/qwen.jpg) | ![MOSS-Image](samples/moss.jpg) | ![Fibo edit](samples/fibo-edit.jpg) |
 | **Qwen-Image 2.1:** A digital painting of a knight in silver armor holding a glowing sword in a dark forest, dramatic lighting. | **MOSS-Image:** A lighthouse on a rocky cliff at sunset, waves crashing below, warm golden light. | **Fibo 2.0**, editing the Krea fox: Make it night with a starry sky and green northern lights |
+| ![Wan 2.2](samples/wan.gif) | | |
+| **Wan 2.2**, a 3-second moving picture made from the Anima picture above: She smiles and turns her head slowly toward the camera, her hair and the petals moving in a light breeze. | | |
 
 ## Downloads
 
