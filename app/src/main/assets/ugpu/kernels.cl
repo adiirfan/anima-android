@@ -27,9 +27,24 @@ __constant sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK
                  // to zero); pairs of products summed in fp16, pairs in fp32; the totals are scaled back once (UNS)
 #define XS(v) ((v) * (half)SCL)
 #define UNS (1.0f / SCL)
+#ifndef HSUM_MASK   // which multiplies take HSUM: bit EPI for gemm/gemml (1 plain, 2 gelu, 4 res+=, 8 res=), 16 the attention blend
+#define HSUM_MASK 31
+#endif
+#ifdef IS_PVSM
+#define HSUM_BIT 16
+#else
+#define HSUM_BIT (1 << EPI)
+#endif
+#if HSUM == 4 && (HSUM_MASK & HSUM_BIT)   // runs of 4 products in fp16, then fp32: fewer conversions, so faster on Adreno
+                // 630. That driver hangs on it unless the kernel is built in a program of its own (kslice), as gemml now is
+#define DOT8(x, w0, w1, w2, w3) ( \
+    convert_float4(mad((x).s3, (w1).hi, mad((x).s2, (w1).lo, mad((x).s1, (w0).hi, (x).s0 * (w0).lo)))) + \
+    convert_float4(mad((x).s7, (w3).hi, mad((x).s6, (w3).lo, mad((x).s5, (w2).hi, (x).s4 * (w2).lo)))))
+#else
 #define DOT8(x, w0, w1, w2, w3) ( \
     convert_float4(mad((x).s1, (w0).hi, (x).s0 * (w0).lo)) + convert_float4(mad((x).s3, (w1).hi, (x).s2 * (w1).lo)) + \
     convert_float4(mad((x).s5, (w2).hi, (x).s4 * (w2).lo)) + convert_float4(mad((x).s7, (w3).hi, (x).s6 * (w3).lo)))
+#endif
 #elif ACC32
 #define DOT8(x, w0, w1, w2, w3) ( \
     (float)(x).s0 * convert_float4((w0).lo) + (float)(x).s1 * convert_float4((w0).hi) + \
@@ -130,6 +145,7 @@ __kernel void gemm(__read_only image2d_t X, __read_only image2d_t W, int N, int 
 #endif
 }
 
+// ======== shared-weight multiply (built alone: see kslice in rt.h) ========
 // Shared-weight version: a work group of WG items covers WG*TNI tokens x 4*G outputs; the group's weights for KC
 // inputs are staged in local memory and read by every item (broadcast). Each item: TNI tokens x 4*G outputs.
 // Launch: global (ceil(N/TNI) rounded to WG, M/(4G), batch), local (WG, 1, 1).
@@ -199,8 +215,8 @@ __kernel void gemml(__read_only image2d_t X, __read_only image2d_t W, int N, int
 #pragma unroll
         for (int g = 0; g < G; g += 2) {
             float8 v = (float8)(r[i][g], r[i][g + 1]);
-#if EPI == 1
-            v = 0.5f * v * (1.0f + erf(v * 0.70710678f));
+#if EPI == 1 && !GELU_PASS   // GELU_PASS: gelu8 applies it afterwards (the erf here lowers how many threads Adreno
+            v = 0.5f * v * (1.0f + erf(v * 0.70710678f));   // 630 runs at once, which undoes the HSUM speed-up)
 #endif
             ST8(Y, n, (b + yb0) * yby + (mb * G + g) / 2, convert_half8(v));
         }
@@ -217,6 +233,8 @@ __kernel void gemml(__read_only image2d_t X, __read_only image2d_t W, int N, int
 #endif
     }
 }
+
+// ======== end of shared-weight multiply ========
 
 // out = layernorm(res) * (1 + sc) + sh, one work item per token, written in X layout
 __kernel void lnmod(__global const float4 *res, __global const float4 *sh, __global const float4 *sc,
@@ -591,6 +609,14 @@ __kernel void grpattn(__read_only image2d_t In, int n1, int grp, int qr, int kr,
         m = mn;
     }
     for (int c = 0; c < 16; c++) ST8(O, n, h * 16 + c, convert_half8(acc[c] / l));
+}
+// exact GELU of an X-layout image, tokens [n0, n): the second half of a split GELU multiply (ops.h GELUP).
+// launch (n - n0, C / 8)
+__kernel void gelu8(__read_only image2d_t Y, int n0, int n, __write_only image2d_t Z) {
+    const int t = n0 + get_global_id(0), c = get_global_id(1);
+    if (t >= n) return;
+    const float8 a = convert_float8(LD8(Y, t, c));
+    ST8(Z, t, c, convert_half8(0.5f * a * (1.0f + erf(a * 0.70710678f))));
 }
 // Krea's text MLP: Z = gelu_tanh(Y + b), X layout. launch (N, C / 8)
 __kernel void biasgelu(__read_only image2d_t Y, __global const float *b, int N, __write_only image2d_t Z) {
