@@ -113,7 +113,24 @@ class ReleaseCheck {
     }
 
     private fun need(sel: BySelector, what: String, ms: Long = 10_000): UiObject2 =
-        waitFor(sel, ms) ?: fail("not on screen: $what")
+        settled(sel, waitFor(sel, ms) ?: fail("not on screen: $what"))
+
+    /**
+     * Waits until [obj] stops moving (a page still scrolling, a card sliding in) and returns it fresh: a tap on a
+     * moving page only stops the scroll, as it does for a person.
+     */
+    private fun settled(sel: BySelector, obj: UiObject2): UiObject2 {
+        var last = runCatching { obj.visibleBounds }.getOrNull()
+        repeat(20) {
+            Thread.sleep(250)
+            fresh()
+            val now = device.findObject(sel) ?: return obj
+            val b = runCatching { now.visibleBounds }.getOrNull()
+            if (b != null && b == last) return now
+            last = b
+        }
+        return device.findObject(sel) ?: obj
+    }
 
     /** Fails, keeping what was on screen in Android/data/com.anima.npu/files/release-check-screen.xml. */
     private fun fail(why: String): Nothing {
@@ -123,11 +140,11 @@ class ReleaseCheck {
 
     /** Finds something that may be further down a scrolling page: scrolls down, then back up, until it shows. */
     private fun scrollTo(sel: BySelector, what: String): UiObject2 {
-        waitFor(sel, 2_000)?.let { return it }
+        waitFor(sel, 2_000)?.let { return settled(sel, it) }
         // swipe inside the page's own scrolling area: the phone's screen size can be the other screen's on a Fold
         for (dir in listOf(Direction.DOWN, Direction.UP)) repeat(10) {
             swipePage(dir)
-            waitFor(sel, 600)?.let { return it }
+            waitFor(sel, 600)?.let { return settled(sel, it) }
         }
         fail("not on screen, even after scrolling: $what")
     }
@@ -256,6 +273,7 @@ class ReleaseCheck {
     private fun draw(model: String, minutes: Int): Job {
         val before = Queue.store.all().map { it.id }.toSet()
         scrollTo(By.text("Draw"), "the Draw button").click()
+        if (poll(15_000) { Queue.store.all().any { it.id !in before } } != true) fail("$model: Draw added nothing to the queue")
         val job = waitForJob(model, before, minutes)
         scrollTo(By.textStartsWith("Done in"), "the finished picture on the Create page")
         return job
