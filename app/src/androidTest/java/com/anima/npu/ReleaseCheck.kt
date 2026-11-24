@@ -1,6 +1,10 @@
 package com.anima.npu
 
 import android.app.Activity
+import android.app.ActivityOptions
+import android.hardware.display.DisplayManager
+import android.view.Display
+import android.view.accessibility.AccessibilityNodeInfo
 import android.app.Instrumentation
 import android.content.Context
 import android.content.Intent
@@ -14,12 +18,14 @@ import androidx.test.espresso.intent.matcher.IntentMatchers.isInternal
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import org.hamcrest.Matchers.not
 import org.junit.AfterClass
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -44,7 +50,7 @@ class ReleaseCheck {
         private const val TAG = "ReleaseCheck"
         private val ctx: Context get() = InstrumentationRegistry.getInstrumentation().targetContext
         private val device: UiDevice get() = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-        private lateinit var scenario: ActivityScenario<MainActivity>
+        private var scenario: ActivityScenario<MainActivity>? = null
 
         // what was there before, so the check removes exactly what it added
         private var prefsBefore: Map<String, *> = emptyMap<String, Any>()
@@ -64,7 +70,6 @@ class ReleaseCheck {
             lookBefore = Look.mode
             galleryBefore = Gallery.list(ctx).map { it.uri.toString() }.toSet()
             chatsBefore = chats().list().map { it.id }.toSet()
-            scenario = ActivityScenario.launch(MainActivity::class.java)
             Queue.init(ctx)
             jobsBefore = Queue.store.all().map { it.id }.toSet()
             assertEquals("the queue must be empty before the check (something is drawing)", 0, Queue.store.waitingCount())
@@ -82,49 +87,118 @@ class ReleaseCheck {
                 is Set<*> -> e.putStringSet(k, v.filterIsInstance<String>().toSet())
             }
             e.commit()
-            runCatching { scenario.close() }
+            runCatching { scenario?.close() }
         }
     }
 
     private fun log(s: String) = Log.i(TAG, s)
 
+    /** The test runner closes every screen between checks, so each check opens the app again. */
+    @Before fun openApp() {
+        runCatching { scenario?.close() }
+        // a Fold has two screens and only one is on: open the app on that one, where it can be seen and tapped
+        val on = (ctx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).displays
+            .firstOrNull { it.state == Display.STATE_ON } ?: error("no screen is on: wake the phone")
+        val launch = Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        scenario = ActivityScenario.launch(launch, ActivityOptions.makeBasic().setLaunchDisplayId(on.displayId).toBundle())
+    }
+
     // ---- finding things on screen ----
 
-    private fun waitFor(sel: BySelector, ms: Long = 10_000): UiObject2? = device.wait(Until.findObject(sel), ms)
+    /** Looks for [sel] for up to [ms], reading the screen fresh each time (the stored copy can lag behind the app). */
+    private fun waitFor(sel: BySelector, ms: Long = 10_000): UiObject2? = poll(ms) { fresh(); device.findObject(sel) }
+
+    private fun fresh() {
+        if (android.os.Build.VERSION.SDK_INT >= 34) runCatching { InstrumentationRegistry.getInstrumentation().uiAutomation.clearCache() }
+    }
 
     private fun need(sel: BySelector, what: String, ms: Long = 10_000): UiObject2 =
-        waitFor(sel, ms) ?: error("not on screen: $what")
+        waitFor(sel, ms) ?: fail("not on screen: $what")
+
+    /** Fails, keeping what was on screen in Android/data/com.anima.npu/files/release-check-screen.xml. */
+    private fun fail(why: String): Nothing {
+        runCatching { File(ctx.getExternalFilesDir(null), "release-check-screen.xml").outputStream().use { device.dumpWindowHierarchy(it) } }
+        error(why)
+    }
 
     /** Finds something that may be further down a scrolling page: scrolls down, then back up, until it shows. */
     private fun scrollTo(sel: BySelector, what: String): UiObject2 {
         waitFor(sel, 2_000)?.let { return it }
-        val w = device.displayWidth / 2
-        val h = device.displayHeight
-        repeat(8) {
-            device.swipe(w, h * 7 / 10, w, h * 3 / 10, 20)
-            waitFor(sel, 800)?.let { return it }
+        // swipe inside the page's own scrolling area: the phone's screen size can be the other screen's on a Fold
+        for (dir in listOf(Direction.DOWN, Direction.UP)) repeat(10) {
+            swipePage(dir)
+            waitFor(sel, 600)?.let { return it }
         }
-        repeat(16) {
-            device.swipe(w, h * 3 / 10, w, h * 7 / 10, 20)
-            waitFor(sel, 800)?.let { return it }
+        fail("not on screen, even after scrolling: $what")
+    }
+
+    /** Scrolls the page back to its top, where the model menu is. */
+    private fun toTop() {
+        repeat(4) { swipePage(Direction.UP) }
+        device.waitForIdle()
+    }
+
+    /**
+     * One page of scrolling in the largest scrolling area of the app's window; DOWN shows what is further down.
+     * It asks the page to scroll (as a screen reader does) instead of swiping: a Fold's two screens make swipe
+     * positions unreliable.
+     */
+    private fun swipePage(dir: Direction) {
+        val ua = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val roots = ua.windows.filter { it.root?.packageName == ctx.packageName }.mapNotNull { it.root }
+        var best: AccessibilityNodeInfo? = null
+        var bestH = -1
+        val r = android.graphics.Rect()
+        fun walk(n: AccessibilityNodeInfo) {
+            if (n.isScrollable) { n.getBoundsInScreen(r); if (r.height() > bestH) { best = n; bestH = r.height() } }
+            for (k in 0 until n.childCount) n.getChild(k)?.let { walk(it) }
         }
-        error("not on screen, even after scrolling: $what")
+        roots.forEach { walk(it) }
+        best?.performAction(if (dir == Direction.DOWN) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+        device.waitForIdle()
+        Thread.sleep(300)
+    }
+
+    /** Opens the Create page's model menu (from the top of the page), retrying a tap that landed mid-scroll. */
+    private fun openMenu() {
+        toTop()
+        Thread.sleep(800)   // let the scroll settle, or the tap only stops it
+        repeat(3) {
+            need(By.res("model-menu"), "the model menu").click()
+            val open = poll(3_000) { device.findObjects(By.textStartsWith(menu.first().name)).any { !it.text.endsWith("▾") }
+                || device.findObjects(By.textStartsWith(menu.last().name)).any { !it.text.endsWith("▾") } }
+            if (open == true) return
+        }
+        fail("the model menu does not open")
     }
 
     /** Opens a page from the side strip (unfolded) or the side menu (narrow screens). */
     private fun go(page: String) {
-        device.findObject(By.desc("Menu"))?.click()
-        need(By.res("nav-$page"), "the $page button").click()
-        device.waitForIdle()
+        // wait for the page to be drawn: either the side strip's button or the menu button shows
+        poll(10_000) { device.findObject(By.res("nav-$page")) ?: device.findObject(By.desc("Menu")) }
+        val strip = device.hasObject(By.res("nav-$page"))   // unfolded: the buttons are always there
+        repeat(3) {
+            if (!strip) {
+                device.findObject(By.desc("Menu"))?.click()
+                need(By.res("nav-$page"), "the $page button")
+                Thread.sleep(600)   // let the menu finish sliding in, or the tap misses
+            }
+            need(By.res("nav-$page"), "the $page button").click()
+            device.waitForIdle()
+            Thread.sleep(400)
+            // narrow screens: the menu closes once the page opens
+            if (strip || poll(3_000) { !device.hasObject(By.res("nav-$page")) } == true) return
+        }
+        fail("the $page page does not open")
     }
 
     /** Picks a model from the Create menu by the name it shows. */
     private fun pickModel(name: String) {
-        need(By.res("model-menu"), "the model menu").click()
+        openMenu()
         val row = device.wait(Until.findObjects(By.textStartsWith(name)), 5_000)?.firstOrNull { !it.text.endsWith("▾") }
             ?: error("\"$name\" is not in the model menu")
         row.click()
-        need(By.res("model-menu").textStartsWith(name), "\"$name\" chosen in the model menu")
+        need(By.text(java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(name) + ".*▾")), "\"$name\" chosen in the model menu")
     }
 
     private fun setPrompt(text: String) {
@@ -206,7 +280,7 @@ class ReleaseCheck {
 
     @Test fun b_everyModelIsInTheMenu() {
         go("Create")
-        need(By.res("model-menu"), "the model menu").click()
+        openMenu()
         for (c in menu) assertNotNull("\"${c.name}\" is missing from the model menu", waitFor(By.textStartsWith(c.name), 3_000))
         device.pressBack()
         for (c in menu) {
@@ -316,7 +390,12 @@ class ReleaseCheck {
     /** Checks [f] every 0.3 s for up to [ms]; returns its first answer that is neither null nor false. */
     private fun <T> poll(ms: Long, f: () -> T?): T? {
         val t0 = System.currentTimeMillis()
-        while (System.currentTimeMillis() - t0 < ms) { f()?.let { if (it != false) return it }; Thread.sleep(300) }
+        while (System.currentTimeMillis() - t0 < ms) {
+            // a screen changing under us (a stale button) just means "not yet"
+            fresh()
+            runCatching { f() }.getOrNull()?.let { if (it != false) return it }
+            Thread.sleep(300)
+        }
         return null
     }
 }
