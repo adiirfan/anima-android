@@ -253,11 +253,13 @@ class ModelStore(
 
     private fun dm(ctx: Context) = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
 
-    private fun enqueue(ctx: Context, url: String, name: String, title: String): Long {
+    // [visible]: a notification while it downloads. The model lists checked on every launch are not shown: seven
+    // of them flashing past each time the app opened looked like it was downloading something.
+    private fun enqueue(ctx: Context, url: String, name: String, title: String, visible: Boolean = true): Long {
         File(modelDir(ctx), name).delete()
         val req = DownloadManager.Request(Uri.parse(url))
             .setTitle(title)
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
+            .setNotificationVisibility(if (visible) DownloadManager.Request.VISIBILITY_VISIBLE else DownloadManager.Request.VISIBILITY_HIDDEN)
             .setDestinationInExternalFilesDir(ctx, null, "models/$sub$name")
         return dm(ctx).enqueue(req)
     }
@@ -313,7 +315,7 @@ class ModelStore(
         val url = manifestUrl ?: error("$title is not available for ${Chip.label}")
         // strays from checks that overlapped: Android saves under "manifest.json-1.part" when the name is taken
         modelDir(ctx).listFiles()?.filter { Regex("manifest\\.json-\\d+\\.part").matches(it.name) }?.forEach { it.delete() }
-        val id = enqueue(ctx, url, "manifest.json.part", "$title model list")
+        val id = enqueue(ctx, url, "manifest.json.part", "$title model list", visible = false)
         waitFor(ctx, listOf(id)) {}
         // the file Android actually wrote (another check of the same model may have held the usual name)
         val part = localFile(ctx, id) ?: File(modelDir(ctx), "manifest.json.part")
