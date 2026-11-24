@@ -34,15 +34,17 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
 
 /** The app's settings, grouped as in the Paper design: Models, Look, Drawing. */
 @Composable
 fun SettingsScreen(onSetup: () -> Unit) {
     val ctx = LocalContext.current
     val p = LocalPaper.current
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
-
+    val models: @Composable ColumnScope.() -> Unit = {
         SectionLabel("Models")
         PaperCard(padding = PaddingValues(horizontal = 16.dp)) {
             val onPhone = remember { ModelStore.ALL.count { it.active(ctx).installed(ctx) != null } }
@@ -87,6 +89,8 @@ fun SettingsScreen(onSetup: () -> Unit) {
             }
         }
 
+    }
+    val look: @Composable ColumnScope.() -> Unit = {
         SectionLabel("Look")
         PaperCard(padding = PaddingValues(horizontal = 16.dp)) {
             Block {
@@ -114,6 +118,8 @@ fun SettingsScreen(onSetup: () -> Unit) {
             }
         }
 
+    }
+    val drawing: @Composable ColumnScope.() -> Unit = {
         SectionLabel("Drawing")
         PaperCard(padding = PaddingValues(horizontal = 16.dp)) {
             if (Chip.supported) PaperRow {
@@ -125,6 +131,48 @@ fun SettingsScreen(onSetup: () -> Unit) {
                 Switch(StatsBar.shown(ctx), { StatsBar.set(ctx, it) }, colors = paperSwitchColors())
             }
         }
+    }
+    val about: @Composable ColumnScope.() -> Unit = {
+        SectionLabel("About")
+        val scope = rememberCoroutineScope()
+        var checking by remember { mutableStateOf(false) }
+        val u = AppUpdate.available
+        PaperCard(padding = PaddingValues(horizontal = 16.dp)) {
+            PaperRow {
+                RowTitle("Version")
+                Spacer(Modifier.weight(1f))
+                Text(if (BuildConfig.APP_BUILD == 0L) "test build" else "build ${BuildConfig.APP_BUILD}", fontSize = 14.sp, color = p.muted)
+            }
+            PaperRow(divider = false) {
+                Text(when {
+                    u != null -> "Build ${u.build} available"
+                    checking -> "Checking…"
+                    BuildConfig.APP_BUILD == 0L -> "Test builds are not updated"
+                    else -> "Up to date"
+                }, Modifier.weight(1f), fontSize = 14.sp, color = p.muted)
+                if (u != null) Pill("Install", enabled = !AppUpdate.busy) {
+                    scope.launch { AppUpdate.install(ctx) {
+                        when {
+                            QueueService.running -> "A picture is drawing"
+                            Chat.busy() -> "${LocalLing.name(ctx)} is answering"
+                            else -> null
+                        }
+                    } }
+                } else if (BuildConfig.APP_BUILD != 0L) Pill(if (checking) "Checking…" else "Check for updates", enabled = !checking) {
+                    scope.launch { checking = true; try { AppUpdate.check(ctx) } finally { checking = false } }
+                }
+            }
+            if (AppUpdate.status.isNotEmpty()) Note(AppUpdate.status)
+        }
+    }
+    // unfolded: two columns, as in the design (Models and Drawing on the left, Look and About on the right)
+    if (isWide()) Row(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) { models(); drawing() }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) { look(); about() }
+    } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        models(); look(); drawing(); about(); Spacer(Modifier.height(8.dp))
     }
 }
 
