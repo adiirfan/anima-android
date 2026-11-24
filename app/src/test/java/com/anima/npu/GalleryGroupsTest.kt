@@ -41,5 +41,7 @@ class GalleryGroupsTest {
         assertEquals(listOf(at(24, 9), at(24, 1)), g[0].second)
     }
 
+    @Test fun unknownDateIsEarlier() = assertEquals("Earlier", dayLabel(0, now, zone))
+
     @Test fun emptyGivesNoGroups() = assertEquals(0, groupByDay(emptyList<Long>(), { it }, now, zone).size)
 }

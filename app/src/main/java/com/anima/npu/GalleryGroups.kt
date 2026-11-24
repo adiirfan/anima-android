@@ -25,8 +25,9 @@ enum class GalleryFilter(val label: String) {
 private val SAME_YEAR = DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH)
 private val OTHER_YEAR = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH)
 
-/** "Today", "Yesterday", "21 Nov", or "3 Dec 2025" in another year. */
+/** "Today", "Yesterday", "21 Nov", or "3 Dec 2025" in another year; "Earlier" for a picture saved without a date. */
 fun dayLabel(savedAt: Long, now: Long, zone: ZoneId): String {
+    if (savedAt <= 0) return "Earlier"
     val day = Instant.ofEpochMilli(savedAt).atZone(zone).toLocalDate()
     val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
     return when {
@@ -42,7 +43,7 @@ fun <T> groupByDay(items: List<T>, savedAt: (T) -> Long, now: Long, zone: ZoneId
     val out = mutableListOf<Pair<String, MutableList<T>>>()
     var lastDay: LocalDate? = null
     for (item in items) {
-        val day = Instant.ofEpochMilli(savedAt(item)).atZone(zone).toLocalDate()
+        val day = if (savedAt(item) <= 0) LocalDate.MIN else Instant.ofEpochMilli(savedAt(item)).atZone(zone).toLocalDate()
         if (day != lastDay) { out += dayLabel(savedAt(item), now, zone) to mutableListOf(); lastDay = day }
         out.last().second += item
     }

@@ -11,6 +11,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.VerticalDivider
@@ -804,10 +805,17 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
     var chosen by remember { mutableStateOf<Set<String>>(emptySet()) }
     var choosing by remember { mutableStateOf(false) }
     var asking by remember { mutableStateOf(false) }
+    var clips by remember { mutableStateOf<Set<String>>(emptySet()) }   // which pictures are GIFs or videos
     LaunchedEffect(Unit) {
-        items = withContext(Dispatchers.IO) { Gallery.list(ctx) }
+        withContext(Dispatchers.IO) {
+            val all = Gallery.list(ctx)
+            clips = all.filter { Gallery.isClip(ctx, it) }.map { it.uri.toString() }.toSet()
+            items = all
+        }
         loaded = true
     }
+    val shown = remember(items, clips, galleryFilter) { items.filter { galleryFilter.matches(it.kind, it.uri.toString() in clips) } }
+    val groups = remember(shown) { groupByDay(shown, { it.savedAt }, System.currentTimeMillis(), java.time.ZoneId.systemDefault()) }
     fun stop() { choosing = false; chosen = emptySet() }
     BackHandler(enabled = choosing) { stop() }
     val scheme = MaterialTheme.colorScheme
@@ -817,12 +825,14 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
             Text(if (chosen.isEmpty()) "Choose pictures" else "${chosen.size} chosen", Modifier.weight(1f).padding(start = 8.dp),
                 fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             IconButton(onClick = {
-                chosen = if (chosen.size == items.size) emptySet() else items.map { it.uri.toString() }.toSet()
-            }) { Icon(AppIcons.SelectAll, if (chosen.size == items.size) "Choose none" else "Choose all") }
+                chosen = if (chosen.size == shown.size) emptySet() else shown.map { it.uri.toString() }.toSet()
+            }) { Icon(AppIcons.SelectAll, if (chosen.size == shown.size) "Choose none" else "Choose all") }
             IconButton(onClick = { asking = true }, enabled = chosen.isNotEmpty()) { Icon(AppIcons.Delete, "Delete chosen") }
         } else ChatBar(openMenu, "Gallery", buttons = 1) {
-            Pill("Select", enabled = items.isNotEmpty(), modifier = Modifier.padding(end = 12.dp)) { choosing = true }
+            Pill("Select", enabled = shown.isNotEmpty(), modifier = Modifier.padding(end = 12.dp)) { choosing = true }
         }
+        if (loaded && items.isNotEmpty()) PillChoices(GalleryFilter.values().map { it.label }, galleryFilter.ordinal,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { galleryFilter = GalleryFilter.values()[it] }
         if (asking) AlertDialog(onDismissRequest = { asking = false },
             title = { Text(if (chosen.size == 1) "Delete this picture?" else "Delete ${chosen.size} pictures?") },
             text = { Text("They are removed from the phone, not only from this list.") },
@@ -836,12 +846,19 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
                 }
             }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { asking = false }) { Text("Cancel") } })
-        if (loaded && items.isEmpty()) {
-            Text("No saved pictures yet.", Modifier.padding(16.dp))
+        if (loaded && shown.isEmpty()) {
+            Text(when {
+                items.isEmpty() -> "No saved pictures yet."
+                galleryFilter == GalleryFilter.CLIPS -> "No clips yet."
+                galleryFilter == GalleryFilter.EDITS -> "No edits yet. Pictures you change with Klein, Qwen or Fibo, and upscales, show here."
+                else -> "No pictures yet."
+            }, Modifier.padding(16.dp), color = LocalPaper.current.muted)
             return@Column
         }
-        LazyVerticalGrid(if (isWide()) GridCells.Adaptive(170.dp) else GridCells.Fixed(3), Modifier.fillMaxSize().padding(horizontal = 13.dp, vertical = 4.dp)) {
-            items(items, key = { it.uri.toString() }) { e ->
+        LazyVerticalGrid(GridCells.Fixed(if (isWide()) 4 else 3), Modifier.fillMaxSize().padding(horizontal = 13.dp, vertical = 4.dp)) {
+          for ((day, dayItems) in groups) {
+            item(key = "day:$day", span = { GridItemSpan(maxLineSpan) }) { SectionLabel(day, Modifier.padding(top = 10.dp, bottom = 4.dp)) }
+            items(dayItems, key = { it.uri.toString() }) { e ->
                 // each preview is made when its square comes into view, and kept for next time
                 val thumb by produceState(Gallery.cachedThumbnail(e, 384), e.uri) {
                     if (value == null) value = withContext(Dispatchers.IO) { Gallery.thumbnail(ctx, e, 384) }
@@ -854,6 +871,13 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
                     onLongClick = { if (!choosing) { choosing = true; chosen = setOf(key) } else toggle() })) {
                     thumb?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize().padding(if (on) 10.dp else 0.dp)
                         .clip(RoundedCornerShape(if (on) 8.dp else 0.dp)), contentScale = ContentScale.Crop) }
+                    if (key in clips) Row(Modifier.align(Alignment.BottomStart).padding(6.dp).clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.72f)).padding(horizontal = 7.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("▶", color = Color.White, fontSize = 9.sp)
+                        Spacer(Modifier.width(3.dp))
+                        Text("Clip", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
                     if (choosing) Box(Modifier.align(Alignment.TopStart).padding(6.dp).size(24.dp).clip(CircleShape)
                         .background(if (on) scheme.surface else Color.Black.copy(alpha = 0.25f))) {
                         if (on) Icon(AppIcons.CheckCircle, null, Modifier.fillMaxSize(), tint = scheme.primary)
@@ -861,9 +885,13 @@ fun GalleryGrid(openMenu: () -> Unit, onOpen: (Gallery.Entry) -> Unit) {
                     }
                 }
             }
+          }
         }
     }
 }
+
+/** The gallery's filter, kept while the app is open (leaving the page and coming back keeps it). */
+private var galleryFilter by mutableStateOf(GalleryFilter.ALL)
 
 @Composable
 fun Detail(e0: Gallery.Entry, onBack: () -> Unit, onUse: (Gallery.Entry) -> Unit) {
