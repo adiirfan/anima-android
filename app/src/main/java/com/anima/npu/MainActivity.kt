@@ -186,12 +186,17 @@ const val MOSS_TIME = "8 steps · about 1 min 30 s"   // MOSS-Image SFT + 8-step
 val BIG_MODELS = setOf("qwen", "fibo", "moss", "wan", "krea")
 const val WAN_TIME = "17 frames, a looping video · about 2.5 min on the iQOO 13"
 const val WAN_LONG_TIME = "49 frames, a 3-second video · about 3.5 min"   // the Fold, 2026-11-18 (206 s)
+const val WAN_GPU_TIME = "49 frames, a 3-second video · about 4.5 min on the graphics chip"   // the Fold on Vulkan, 2026-11-24 (227-270 s)
 const val MOSS_GPU_TIME = "8 steps · about 4 min on the graphics chip"   // the Fold in the app, 2026-11-19 (232 s)
 const val FIBO_GPU_TIME = "edits only · 4 steps · about 6 min on the graphics chip"   // the Fold in the app, 2026-11-24: 4-bit file on OpenCL, 331 s of steps
 
-/** The clip length the phone's Wan files make: frames.txt says 49 for the 3-second set, none means 17. */
+/**
+ * The clip length the phone's Wan files make: on the graphics chip always 49 frames; on the AI chip frames.txt says 49
+ * for the 3-second set, none means 17.
+ */
 fun wanTime(ctx: android.content.Context) =
-    if (java.io.File(ModelStore.WAN.modelDir(ctx), "frames.txt").takeIf { it.isFile }?.readText()?.trim() == "49") WAN_LONG_TIME else WAN_TIME
+    if (GpuEngine.useForWan(ctx)) WAN_GPU_TIME
+    else if (java.io.File(ModelStore.WAN.modelDir(ctx), "frames.txt").takeIf { it.isFile }?.readText()?.trim() == "49") WAN_LONG_TIME else WAN_TIME
 val SHAPES = listOf("Square", "Tall 9:16", "Wide 16:9")
 private val SIZES = listOf(
     listOf(512 to 512, 384 to 672, 672 to 384),

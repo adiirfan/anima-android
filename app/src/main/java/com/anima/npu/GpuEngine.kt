@@ -589,9 +589,12 @@ object GpuEngine {
     /** Wan on the graphics chip: picked on the models page, or the phone has no AI-chip build of it. */
     fun useForWan(ctx: Context) = ModelStore.WAN.runsOnGpu(ctx) && wanReady(ctx)
 
-    /** Frames per clip: frames.txt in the graphics folder (4n + 1), else 17 (about 1 s at 16 per second). */
+    /**
+     * Frames per clip: frames.txt in the graphics folder (4n + 1), else 49 (3 s at 16 per second), the same clip as the
+     * AI chip's 3-second set (the graphics download has no frames.txt).
+     */
     fun wanFrames(ctx: Context): Int =
-        File(wanDir(ctx), "frames.txt").takeIf { it.isFile }?.readText()?.trim()?.toIntOrNull()?.takeIf { it >= 5 && (it - 1) % 4 == 0 } ?: 17
+        File(wanDir(ctx), "frames.txt").takeIf { it.isFile }?.readText()?.trim()?.toIntOrNull()?.takeIf { it >= 5 && (it - 1) % 4 == 0 } ?: 49
 
     /**
      * A clip from the start picture [start] (768 x 768 ARGB) and the prompt's reader rows [rows] (n x 4096, WanReader).
@@ -671,12 +674,24 @@ object GpuEngine {
         writeF32(File(dec, "lat.f32"), lat)
         File(dec, "info.txt").writeText("$hl $wl $T\n")
         run(ctx, listOf(File(wdir, "tae_w22.gguf").absolutePath, dec.absolutePath), mapOf("TUNEFILE" to File(home, "tae_w22.tune").absolutePath))
-        val rgb = readF32(File(dec, "gpu_rgb.f32"))
+        // one frame at a time: the whole 49-frame clip as floats is 347 MB, more than the app's memory allowance
         val NP = W * H
-        if (rgb.size != FR * NP * 3) error("clip decoder gave ${rgb.size} numbers, not ${FR * NP * 3}")
-        cleanUp(ctx, work)
+        val out = File(dec, "gpu_rgb.f32")
+        if (out.length() != FR.toLong() * NP * 3 * 4) error("clip decoder gave ${out.length() / 4} numbers, not ${FR.toLong() * NP * 3}")
         fun px(v: Float) = (v.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
-        return List(FR) { f -> IntArray(NP) { k -> val o = (f * NP + k) * 3
-            (0xFF shl 24) or (px(rgb[o]) shl 16) or (px(rgb[o + 1]) shl 8) or px(rgb[o + 2]) } }
+        val frames = ArrayList<IntArray>(FR)
+        java.io.RandomAccessFile(out, "r").use { raf ->
+            val buf = ByteBuffer.allocate(NP * 3 * 4).order(ByteOrder.LITTLE_ENDIAN)
+            val fl = buf.asFloatBuffer()
+            for (f in 0 until FR) {
+                buf.clear()
+                val at = f.toLong() * NP * 3 * 4
+                while (buf.hasRemaining()) if (raf.channel.read(buf, at + buf.position()) < 0) error("clip decoder output ended early")
+                frames.add(IntArray(NP) { k -> val o = k * 3
+                    (0xFF shl 24) or (px(fl.get(o)) shl 16) or (px(fl.get(o + 1)) shl 8) or px(fl.get(o + 2)) })
+            }
+        }
+        cleanUp(ctx, work)
+        return frames
     }
 }
