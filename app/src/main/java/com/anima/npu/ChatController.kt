@@ -88,10 +88,12 @@ class ChatController(ctx: Context) {
             }
             var badInARow = 0
             var queued = false
+            var called = false
             for (round in 0 until 3) {
                 val c = store.get(id) ?: return@withChat
                 val calls = runRound(id, c) ?: return@withChat
                 if (calls.isEmpty()) break
+                called = true
                 if (round == 2) break  // two tool rounds per message at most
                 val (ok, lastBad) = handleTools(id, calls)
                 if (ok) { queued = true; badInARow = 0 } else badInARow++
@@ -101,6 +103,9 @@ class ChatController(ctx: Context) {
                 }
                 if (stopping) break
             }
+            // the small model often answers "Sure, I can draw that!" and never asks for it: if the user asked for a
+            // picture in so many words, offer the card anyway, with their own words as the description
+            if (!called && !stopping && forgotToDraw(id)) queued = true
             if (queued) QueueService.kick(app)
         }
     }
@@ -146,20 +151,30 @@ class ChatController(ctx: Context) {
         // message, or the word "edit" in it, makes the call an edit of the newest picture whatever the model said.
         val said = c.msgs.lastOrNull { it is Msg.User } as Msg.User?
         val wantsEdit = said != null && (said.imageFile != null || Regex("\\bedit", RegexOption.IGNORE_CASE).containsMatchIn(said.text))
+        val named = namedSettings(said?.text ?: "")
+        val installed = installedPictureModels()
         for (k in calls) {
             append(id, Msg.ToolCall(newId(), k.id, k.name, k.args.toString()))
             val result = if (k.name != "draw_picture") JSONObject().put("error", "Unknown tool ${k.name}; use draw_picture.")
             else when (val r = checkDraw(
                     if (wantsEdit && target.first != null) runCatching { JSONObject(k.args.toString()).put("edit", true).toString() }
                         .getOrDefault(k.args.toString()) else k.args.toString(),
-                    target.second, ModelStore.QWEN.installed(app) == "standard",
-                    // the copy the queue draws with: phones without the AI chip have only the graphics-chip one
-                    ModelStore.PICTURE.filter { it.active(app).installed(app) != null }.map { it.id }.toSet())) {
-                is ToolCheck.Ok -> {
-                    val jobs = enqueueFromChat(id, r.args, if (r.args.edit) target.first else null)
-                    jobs.forEach { j -> append(id, Msg.Picture(newId(), j.id)) }
-                    ok = true
-                    JSONObject().put("queued", jobs.size).put("position", Queue.store.waitingCount())
+                    // which models are downloaded is planDraw's to judge
+                    target.second, ModelStore.QWEN.installed(app) == "standard", setOf("anima", "qwen"))) {
+                is ToolCheck.Ok -> when (val plan = planDraw(r.args.model, r.args.edit, named, installed)) {
+                    is DrawPlan.Queue -> {
+                        val jobs = enqueueFromChat(id, r.args.copy(model = plan.model), if (r.args.edit) target.first else null, plan.tier, plan.steps)
+                        jobs.forEach { j -> append(id, Msg.Picture(newId(), j.id)) }
+                        ok = true
+                        JSONObject().put("queued", jobs.size).put("position", Queue.store.waitingCount())
+                    }
+                    is DrawPlan.Ask -> {
+                        append(id, choiceFor(r.args.prompt, r.args.size, r.args.count, plan))
+                        ok = true
+                        JSONObject().put("waiting", "A card under your reply lets the user pick the model, size and steps and tap Draw. " +
+                            "Tell them so in one short sentence.")
+                    }
+                    is DrawPlan.Bad -> { lastBad = plan.message; JSONObject().put("error", plan.message) }
                 }
                 is ToolCheck.Bad -> { lastBad = r.message; JSONObject().put("error", r.message) }
             }
@@ -196,7 +211,41 @@ class ChatController(ctx: Context) {
         return null to "There is no picture in this chat to edit. Ask the user to attach one or to ask for a new picture."
     }
 
-    private fun enqueueFromChat(convId: String, a: DrawArgs, image: Pic?): List<Job> {
+    /** The picture models on this phone, by the copy the queue draws with (phones without the AI chip have only the graphics-chip one). */
+    private fun installedPictureModels() = ModelStore.PICTURE.filter { it.active(app).installed(app) != null }.map { it.id }.toSet()
+
+    private fun choiceFor(prompt: String, shape: String, count: Int, p: DrawPlan.Ask) =
+        Msg.Choice(newId(), prompt, shape, count, p.model, p.askModel, p.askSize, p.askSteps, p.tier, p.steps)
+
+    /** After a turn with no draw_picture: queue or offer the picture the user plainly asked for. True when something was queued. */
+    private fun forgotToDraw(id: String): Boolean {
+        val said = store.get(id)?.msgs?.lastOrNull { it is Msg.User } as Msg.User? ?: return false
+        if (said.imageFile != null || !wantsPicture(said.text)) return false   // edits need the model's instruction
+        val words = pictureWords(said.text).ifEmpty { return false }
+        val shape = when { Regex("""\b(portrait|tall)\b""", RegexOption.IGNORE_CASE).containsMatchIn(said.text) -> "portrait"
+            Regex("""\b(landscape|wide)\b""", RegexOption.IGNORE_CASE).containsMatchIn(said.text) -> "landscape"; else -> "square" }
+        return when (val plan = planDraw("anima", false, namedSettings(said.text), installedPictureModels())) {
+            is DrawPlan.Queue -> {
+                enqueueFromChat(id, DrawArgs(plan.model, words, shape, false, 1), null, plan.tier, plan.steps)
+                    .forEach { j -> append(id, Msg.Picture(newId(), j.id)) }
+                true
+            }
+            is DrawPlan.Ask -> { append(id, choiceFor(words, shape, 1, plan)); false }
+            is DrawPlan.Bad -> false
+        }
+    }
+
+    /** The user tapped Draw on a card: queue it with their picks, and the card becomes the pictures. */
+    fun drawChoice(convId: String, msgId: String, model: String, tier: Int, steps: Int) = synchronized(lock) {
+        val c = store.get(convId) ?: return@synchronized
+        val m = c.msgs.firstOrNull { it.id == msgId } as? Msg.Choice ?: return@synchronized
+        val jobs = enqueueFromChat(convId, DrawArgs(model, m.prompt, m.shape, false, m.count), null, tier, steps)
+        val pics = jobs.map { Msg.Picture(newId(), it.id) }
+        save(c.copy(msgs = c.msgs.flatMap { if (it.id == msgId) pics else listOf(it) }, updated = System.currentTimeMillis()))
+        QueueService.kick(app)
+    }
+
+    private fun enqueueFromChat(convId: String, a: DrawArgs, image: Pic?, tier: Int, steps: Int): List<Job> {
         val drawing = app.getSharedPreferences("anima", Context.MODE_PRIVATE).getString("qwenDrawing", "qwen") ?: "qwen"
         val shape = when (a.size) { "portrait" -> 1; "landscape" -> 2; else -> 0 }
         return (1..a.count).map {
@@ -213,7 +262,8 @@ class ChatController(ctx: Context) {
                 dst
             }
             val j = Job(jid, System.currentTimeMillis(), a.model, if (drawing == "noctq") drawing else "qwen", a.prompt, Random.nextLong(0, 1_000_000_000),
-                8, if (a.model == "anima") 1 else 0, shape, 1f, 0.5f, src, "chat:$convId")
+                // steps and size are Anima's; Qwen keeps its own
+                if (a.model == "anima") steps else 8, if (a.model == "anima") tier else 0, shape, 1f, 0.5f, src, "chat:$convId")
             Queue.store.add(j)
             j
         }
@@ -231,13 +281,16 @@ class ChatController(ctx: Context) {
                 JSONObject().put("id", m.callId).put("type", "function")
                     .put("function", JSONObject().put("name", m.name).put("arguments", m.argsJson)))))
             is Msg.ToolResult -> a.put(JSONObject().put("role", "tool").put("tool_call_id", m.callId).put("content", m.resultJson))
-            is Msg.Picture -> {}  // the tool's answer already says it was queued
+            is Msg.Picture, is Msg.Choice -> {}  // the tool's answer already says it was queued or offered
         }
         return a
     }
 
-    private fun append(id: String, m: Msg) {
-        val c = store.get(id) ?: return
+    // a Draw tap and a reply can change the same conversation at once
+    private val lock = Any()
+
+    private fun append(id: String, m: Msg) = synchronized(lock) {
+        val c = store.get(id) ?: return@synchronized
         save(c.copy(msgs = c.msgs + m, updated = System.currentTimeMillis()))
     }
 

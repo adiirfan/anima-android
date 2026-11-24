@@ -12,7 +12,7 @@ class ChatStoreTest {
         val c = Conversation("c1", "Cats", 5, true, listOf(
             Msg.User("1", "draw a cat", "c1-1.png"), Msg.Assistant("2", "Sure", "they want a cat"),
             Msg.ToolCall("3", "call_0", "draw_picture", """{"model":"anima"}"""), Msg.ToolResult("4", "call_0", """{"queued":1}"""),
-            Msg.Picture("5", "job1")))
+            Msg.Picture("5", "job1"), Msg.Choice("6", "cat in a garden", "portrait", 1, "anima", true, true, false, 1, 6)))
         s.save(c)
         assertEquals(c, ChatStore(tmp.root).get("c1"))
     }

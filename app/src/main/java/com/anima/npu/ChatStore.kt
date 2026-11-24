@@ -12,6 +12,9 @@ sealed class Msg {
     data class ToolCall(override val id: String, val callId: String, val name: String, val argsJson: String) : Msg()
     data class ToolResult(override val id: String, val callId: String, val resultJson: String) : Msg()
     data class Picture(override val id: String, val jobId: String) : Msg()
+    /** A picture waiting for the user to pick what they did not say (model, size, steps); becomes Picture on Draw. */
+    data class Choice(override val id: String, val prompt: String, val shape: String, val count: Int, val model: String,
+                      val askModel: Boolean, val askSize: Boolean, val askSteps: Boolean, val tier: Int, val steps: Int) : Msg()
 
     fun toJson(): JSONObject = JSONObject().put("id", id).also { o ->
         when (this) {
@@ -20,6 +23,8 @@ sealed class Msg {
             is ToolCall -> o.put("kind", "tool_call").put("callId", callId).put("name", name).put("args", argsJson)
             is ToolResult -> o.put("kind", "tool_result").put("callId", callId).put("result", resultJson)
             is Picture -> o.put("kind", "picture").put("jobId", jobId)
+            is Choice -> o.put("kind", "choice").put("prompt", prompt).put("shape", shape).put("count", count).put("model", model)
+                .put("askModel", askModel).put("askSize", askSize).put("askSteps", askSteps).put("tier", tier).put("steps", steps)
         }
     }
 
@@ -31,6 +36,8 @@ sealed class Msg {
                 "assistant" -> Assistant(id, o.getString("text"), o.optString("thinking"))
                 "tool_call" -> ToolCall(id, o.getString("callId"), o.getString("name"), o.getString("args"))
                 "tool_result" -> ToolResult(id, o.getString("callId"), o.getString("result"))
+                "choice" -> Choice(id, o.getString("prompt"), o.getString("shape"), o.getInt("count"), o.getString("model"),
+                    o.getBoolean("askModel"), o.getBoolean("askSize"), o.getBoolean("askSteps"), o.getInt("tier"), o.getInt("steps"))
                 else -> Picture(id, o.getString("jobId"))
             }
         }

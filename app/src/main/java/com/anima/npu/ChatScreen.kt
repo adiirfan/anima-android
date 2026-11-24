@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -220,7 +221,10 @@ private fun Conversation(chat: ChatController, convId: String?, conv: Conversati
             verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Bottom)) {
             if (live) item { Reply(turn.partialText, turn.partialThinking, actions = false, bubble) }
             else if (mine) item { StatusLine(status) }
-            items(msgs.asReversed(), key = { it.id }) { m -> MessageRow(m, chat.store().dir(), onOpen, bubble) }
+            items(msgs.asReversed(), key = { it.id }) { m ->
+                MessageRow(m, chat.store().dir(), onOpen, bubble) { ch, model, tier, steps ->
+                    conv?.let { c -> chat.drawChoice(c.id, ch.id, model, tier, steps) } }
+            }
           }
         }
 
@@ -351,7 +355,8 @@ private fun copy(ctx: Context, text: String) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageRow(m: Msg, dir: File, onOpen: (Gallery.Entry) -> Unit, bubble: Dp) {
+private fun MessageRow(m: Msg, dir: File, onOpen: (Gallery.Entry) -> Unit, bubble: Dp,
+                       onDraw: (Msg.Choice, String, Int, Int) -> Unit) {
     val ctx = LocalContext.current
     val scheme = MaterialTheme.colorScheme
     when (m) {
@@ -386,6 +391,48 @@ private fun MessageRow(m: Msg, dir: File, onOpen: (Gallery.Entry) -> Unit, bubbl
             if (!err.isNullOrEmpty()) Text("Not queued: $err", fontSize = 12.5.sp, color = scheme.error)
         }
         is Msg.Picture -> PictureCard(m.jobId, onOpen)
+        is Msg.Choice -> ChoiceCard(m, bubble, onDraw)
+    }
+}
+
+/**
+ * A picture the user asked for without saying which model, size or steps: those rows, ticked with the chat's pick,
+ * 512 and 4 steps, and one Draw. Size and steps are Anima's only; Qwen has its own.
+ */
+@Composable
+private fun ChoiceCard(m: Msg.Choice, bubble: Dp, onDraw: (Msg.Choice, String, Int, Int) -> Unit) {
+    val ctx = LocalContext.current
+    val p = LocalPaper.current
+    val models = remember {
+        val qwen = if (ctx.getSharedPreferences("anima", Context.MODE_PRIVATE).getString("qwenDrawing", "qwen") == "noctq") "Noct Q" else "Qwen-Image"
+        listOf("anima" to "Anima", "qwen" to qwen).filter { (id, _) -> ModelStore.byId(id).active(ctx).installed(ctx) != null }
+    }
+    var model by remember(m.id) { mutableStateOf(m.model) }
+    var tier by remember(m.id) { mutableIntStateOf(m.tier) }
+    var steps by remember(m.id) { mutableIntStateOf(m.steps) }
+    var sent by remember(m.id) { mutableStateOf(false) }
+    val stepChoices = listOf(4, 6, 8)
+    PaperCard(Modifier.widthIn(max = bubble), padding = PaddingValues(14.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Draw this?", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(m.prompt, fontSize = 13.sp, color = p.muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            if (m.askModel && models.size > 1) {
+                Text("Model", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                PillChoices(models.map { it.second }, models.indexOfFirst { it.first == model }, enabled = !sent) { model = models[it].first }
+            }
+            if (model == "anima" && m.askSize) {
+                Text("Size", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                PillChoices(SIZE_TIERS.map { it.first }, tier, enabled = !sent) { tier = it }
+            }
+            if (model == "anima" && m.askSteps) {
+                Text("Steps", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                PillChoices(stepChoices.map { "$it" }, stepChoices.indexOf(steps), enabled = !sent) { steps = stepChoices[it] }
+            }
+            BigButton("Draw", AppIcons.Brush, enabled = !sent, modifier = Modifier.fillMaxWidth()) {
+                sent = true
+                onDraw(m, model, tier, steps)
+            }
+        }
     }
 }
 
